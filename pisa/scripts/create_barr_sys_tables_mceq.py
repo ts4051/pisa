@@ -12,7 +12,7 @@ import cPickle as pickle
 
 from scipy.interpolate import RectBivariateSpline
 
-sys.path.append('../../MCEq')
+sys.path.append('../../../../../MCEq')
 #sys.path.append('calculations')
 
 #import solver related modules
@@ -93,6 +93,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     dim_res = len(zenith_list), etr.shape[0]
     gs = mceq_run.get_solution
 
+    # Solving nominal MCEq flux
     numu, anumu, nue, anue = (np.zeros(dim_res), np.zeros(dim_res),
                               np.zeros(dim_res), np.zeros(dim_res))
 
@@ -104,9 +105,10 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
         nue[iz] = gs('total_nue', 0)[tr]
         anue[iz] = gs('total_antinue', 0)[tr]
 
+    # Solving for pluss one sigma 
     mceq_run.unset_mod_pprod(dont_fill=True)
     for p in barr_pars:
-        mceq_run.set_mod_pprod(2212, pid, barr_unc, (p, delta))
+        mceq_run.set_mod_pprod(2212, pid, barr_unc, (p, delta))        
 #     mceq_run.y.print_mod_pprod()
     mceq_run._init_default_matrices(skip_D_matrix=True)
 
@@ -120,6 +122,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
         nue_up[iz] = gs('total_nue', 0)[tr]
         anue_up[iz] = gs('total_antinue', 0)[tr]
 
+    # Solving for minus one sigma
     mceq_run.unset_mod_pprod(dont_fill=True)
     for p in barr_pars:
         mceq_run.set_mod_pprod(2212, pid, barr_unc, (p, -delta))
@@ -154,7 +157,7 @@ if __name__ == '__main__':
     iamod = normalize_hadronic_model_name(sys.argv[1]) #the interaction model
     iatag = sys.argv[2] # Tag name for the interaction model
     
-    CRModel = pm.GaisserHonda
+    CRModel = pm.GlobalSplineFitBeta # pm.GaisserHonda
 
     print 'Running with', iamod
     idjob = 0  # int(os.path.expandvars('$SGE_TASK_ID')) - 1
@@ -215,7 +218,7 @@ if __name__ == '__main__':
         solution[bp + '-'] = compute_abs_derivatives(mceq_run, -211, bp, angles)
 
     # Barr variables related to kaons
-    barr_kvars = ['w', 'y', 'z']
+    barr_kvars = ['w', 'y', 'z', 'x']
 
     for bp in barr_kvars:
         # if bp != 'y':
