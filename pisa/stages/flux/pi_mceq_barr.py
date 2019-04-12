@@ -77,9 +77,9 @@ class pi_mceq_barr(PiStage):
 
         # what are the keys used from the inputs during apply
         input_calc_keys = ('weights',
-                           'nominal_nu_flux',
-                           'nominal_nubar_flux',
-                          )
+        #                   'nominal_nu_flux',
+         #                  'nominal_nubar_flux',
+                         )
         # what are keys added or altered in the calculation used during apply
         output_calc_keys = ('sys_flux',
                            )
@@ -117,7 +117,7 @@ class pi_mceq_barr(PiStage):
         for container in self.data:
             container['sys_flux'] = np.empty((container.size, 2), dtype=FTYPE)
 
-            # TODO: Get rid of these.... Shouldnt have to empty before filling up...
+            # Must be initialized, as this value would otherwise be added to the container in pi_honda_ip.py
             container['nominal_nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
             container['nominal_nubar_flux'] = np.empty((container.size, 2), dtype=FTYPE)
             #container.add_array_data('sys_flux', np.empty((container.size, 2), dtype=FTYPE))
@@ -146,10 +146,10 @@ class pi_mceq_barr(PiStage):
                 # each column is a spline evaluated for each event (given energy and coszen)
 
             # Since they are all equal, take a random barr variable 
-            container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4]
-            container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0]
-            container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6]
-            container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2]
+            container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4] # Nue splone
+            container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0] # Numu spline
+            container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6] # antinuespline
+            container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2] # antinumuspline 
 
         #plt.scatter(container['true_energy'].get('host'),container['nominal_nu_flux'][:,1]*(container['true_energy'].get('host')**3),label='numu', color='r')
         #plt.scatter(container['true_energy'].get('host'),container['nominal_nubar_flux'][:,1]*(container['true_energy'].get('host')**3),label='numubar', color='g')
@@ -184,13 +184,13 @@ class pi_mceq_barr(PiStage):
         #barr_b = self.params.barr_b.value.m_as('dimensionless')
         #barr_c = self.params.barr_c.value.m_as('dimensionless')
         #barr_d = self.params.barr_d.value.m_as('dimensionless')
-        barr_e = self.params.barr_e.value.m_as('dimensionless')
-        barr_f = self.params.barr_f.value.m_as('dimensionless')
+        #barr_e = self.params.barr_e.value.m_as('dimensionless')
+        #barr_f = self.params.barr_f.value.m_as('dimensionless')
         barr_g = self.params.barr_g.value.m_as('dimensionless')
         barr_h = self.params.barr_h.value.m_as('dimensionless')
         barr_i = self.params.barr_i.value.m_as('dimensionless')
         barr_w = self.params.barr_w.value.m_as('dimensionless')
-        barr_x = self.params.barr_x.value.m_as('dimensionless')
+        #barr_x = self.params.barr_x.value.m_as('dimensionless')
         barr_y = self.params.barr_y.value.m_as('dimensionless')
         barr_z = self.params.barr_z.value.m_as('dimensionless')
         for container in self.data:
@@ -201,12 +201,12 @@ class pi_mceq_barr(PiStage):
                                   #container['barr_b+'].get(WHERE), container['barr_b-'].get(WHERE), barr_b,
                                   #container['barr_c+'].get(WHERE), container['barr_c-'].get(WHERE), barr_c,
                                   #container['barr_d+'].get(WHERE), container['barr_d-'].get(WHERE), barr_d,
-                                  container['barr_e+'].get(WHERE), container['barr_e-'].get(WHERE), barr_e,
-                                  container['barr_f+'].get(WHERE), container['barr_f-'].get(WHERE), barr_f,
+                                  #container['barr_e+'].get(WHERE), container['barr_e-'].get(WHERE), barr_e,
+                                  #container['barr_f+'].get(WHERE), container['barr_f-'].get(WHERE), barr_f,
                                   container['barr_g+'].get(WHERE), container['barr_g-'].get(WHERE), barr_g,
                                   container['barr_h+'].get(WHERE), container['barr_h-'].get(WHERE), barr_h,
                                   container['barr_i+'].get(WHERE), container['barr_i-'].get(WHERE), barr_i,
-                                  container['barr_x+'].get(WHERE), container['barr_x-'].get(WHERE), barr_x,
+                                  #container['barr_x+'].get(WHERE), container['barr_x-'].get(WHERE), barr_x,
                                   container['barr_w+'].get(WHERE), container['barr_w-'].get(WHERE), barr_w,
                                   container['barr_y+'].get(WHERE), container['barr_y-'].get(WHERE), barr_y,
                                   container['barr_z+'].get(WHERE), container['barr_z-'].get(WHERE), barr_z,
@@ -220,8 +220,8 @@ def delta(param, pos_f, pos_d, neg_f, neg_d):
     ''' return fractional delta given a barr parameter and
     the postitive and negative fluxes and derivateives
     '''
-    #print('****')
-    #print('param=', param)
+    print('****')
+    print('param=', param)
     #print('pos_f=', pos_f)
     #print('pos_d=', pos_d)
     #print('neg_f=', neg_f)
@@ -237,13 +237,13 @@ def mod_factor(idx,
                #barr_b_pos, barr_b_neg, barr_b,
                #barr_c_pos, barr_c_neg, barr_c,
                #barr_d_pos, barr_d_neg, barr_d,
-               barr_e_pos, barr_e_neg, barr_e,
-               barr_f_pos, barr_f_neg, barr_f,
+               #barr_e_pos, barr_e_neg, barr_e,
+               #barr_f_pos, barr_f_neg, barr_f,
                barr_g_pos, barr_g_neg, barr_g,
                barr_h_pos, barr_h_neg, barr_h,
                barr_i_pos, barr_i_neg, barr_i,
                barr_w_pos, barr_w_neg, barr_w,
-               barr_x_pos, barr_x_neg, barr_x,
+               #barr_x_pos, barr_x_neg, barr_x,
                barr_y_pos, barr_y_neg, barr_y,
                barr_z_pos, barr_z_neg, barr_z,
                ):
@@ -275,24 +275,47 @@ def mod_factor(idx,
                  #+ delta(barr_b, barr_b_pos[idx], barr_b_pos[idx+1], barr_b_neg[idx], barr_b_neg[idx+1])
                  #+ delta(barr_c, barr_c_pos[idx], barr_c_pos[idx+1], barr_c_neg[idx], barr_c_neg[idx+1])
                  #delta(barr_d, barr_d_pos[idx], barr_d_pos[idx+1], barr_d_neg[idx], barr_d_neg[idx+1])
-                 #+ delta(barr_e, barr_e_pos[idx], barr_e_pos[idx+1], barr_e_neg[idx], barr_e_neg[idx+1])
+                 #delta(barr_e, barr_e_pos[idx], barr_e_pos[idx+1], barr_e_neg[idx], barr_e_neg[idx+1])
                  #+ delta(barr_f, barr_f_pos[idx], barr_f_pos[idx+1], barr_f_neg[idx], barr_f_neg[idx+1])
-                 #+ delta(barr_g, barr_g_pos[idx], barr_g_pos[idx+1], barr_g_neg[idx], barr_g_neg[idx+1])
-                 #+ delta(barr_h, barr_h_pos[idx], barr_h_pos[idx+1], barr_h_neg[idx], barr_h_neg[idx+1])
-                 #+ delta(barr_i, barr_i_pos[idx], barr_i_pos[idx+1], barr_i_neg[idx], barr_i_neg[idx+1])
-                 #+ delta(barr_w, barr_w_pos[idx], barr_w_pos[idx+1], barr_w_neg[idx], barr_w_neg[idx+1])
+                 delta(barr_g, barr_g_pos[idx], barr_g_pos[idx+1], barr_g_neg[idx], barr_g_neg[idx+1])
+                 + delta(barr_h, barr_h_pos[idx], barr_h_pos[idx+1], barr_h_neg[idx], barr_h_neg[idx+1])
+                 + delta(barr_i, barr_i_pos[idx], barr_i_pos[idx+1], barr_i_neg[idx], barr_i_neg[idx+1])
+                 + delta(barr_w, barr_w_pos[idx], barr_w_pos[idx+1], barr_w_neg[idx], barr_w_neg[idx+1])
                  #+ delta(barr_x, barr_x_pos[idx], barr_x_pos[idx+1], barr_x_neg[idx], barr_x_neg[idx+1])
-                 delta(barr_y, barr_y_pos[idx], barr_y_pos[idx+1], barr_y_neg[idx], barr_y_neg[idx+1])
-                 #+ delta(barr_z, barr_z_pos[idx], barr_z_pos[idx+1], barr_z_neg[idx], barr_z_neg[idx+1])
+                 + delta(barr_y, barr_y_pos[idx], barr_y_pos[idx+1], barr_y_neg[idx], barr_y_neg[idx+1])
+                 + delta(barr_z, barr_z_pos[idx], barr_z_pos[idx+1], barr_z_neg[idx], barr_z_neg[idx+1])
                  )
-
+@myjit
+def add_barr(idx,
+               #barr_a_pos, barr_a_neg, barr_a,
+               #barr_b_pos, barr_b_neg, barr_b,
+               #barr_c_pos, barr_c_neg, barr_c,
+               #barr_d_pos, barr_d_neg, barr_d,
+               #barr_e_pos, barr_e_neg, barr_e,
+               #barr_f_pos, barr_f_neg, barr_f,
+               barr_g_pos, barr_g_neg, barr_g,
+               barr_h_pos, barr_h_neg, barr_h,
+               barr_i_pos, barr_i_neg, barr_i,
+               barr_w_pos, barr_w_neg, barr_w,
+               #barr_x_pos, barr_x_neg, barr_x,
+               barr_y_pos, barr_y_neg, barr_y,
+               barr_z_pos, barr_z_neg, barr_z,
+               ):
+  return (0
+          +(barr_g_pos[idx]*barr_g)+(barr_g_neg[idx]*barr_g)
+          + (barr_h_pos[idx]*barr_h)+(barr_h_neg[idx]*barr_h)
+          + (barr_i_pos[idx]*barr_i)+(barr_i_neg[idx]*barr_i)
+          + (barr_w_pos[idx]*barr_w)+(barr_w_neg[idx]*barr_w)
+          + (barr_y_pos[idx]*barr_y)+(barr_y_neg[idx]*barr_y)
+          + (barr_z_pos[idx]*barr_z)+(barr_z_neg[idx]*barr_z)
+          )
 # vectorized function to apply
 # must be outside class
 # if FTYPE == np.float64:
 #     signature = '(f8[:], f8[:], i4, \
 #                   f8[:], f8[:], f8, \
 #                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
+#                   f8[:], f8[:], f8, \s
 #                   f8[:], f8[:], f8, \
 #                   f8[:], f8[:], f8, \
 #                   f8[:], f8[:], f8, \
@@ -341,9 +364,6 @@ if FTYPE == np.float64:
                   f8[:], f8[:], f8, \
                   f8[:], f8[:], f8, \
                   f8[:], f8[:], f8, \
-                  f8[:], f8[:], f8, \
-                  f8[:], f8[:], f8, \
-                  f8[:], f8[:], f8, \
                   f8[:])'
 else:
     signature = '(f4[:], f4[:], i4, \
@@ -353,14 +373,8 @@ else:
                   f4[:], f4[:], f4, \
                   f4[:], f4[:], f4, \
                   f4[:], f4[:], f4, \
-                  f4[:], f4[:], f4, \
-                  f4[:], f4[:], f4, \
-                  f4[:], f4[:], f4, \
                   f4[:])'
 @guvectorize([signature], '(d),(d),(),\
-                           (c),(c),(),\
-                           (c),(c),(),\
-                           (c),(c),(),\
                            (c),(c),(),\
                            (c),(c),(),\
                            (c),(c),(),\
@@ -375,75 +389,109 @@ def apply_barr_vectorized(nominal_nu_flux,
                          #barr_b_pos, barr_b_neg, barr_b,
                           #barr_c_pos, barr_c_neg, barr_c,
                           #barr_d_pos, barr_d_neg, barr_d,
-                          barr_e_pos, barr_e_neg, barr_e,
-                          barr_f_pos, barr_f_neg, barr_f,
+                          #barr_e_pos, barr_e_neg, barr_e,
+                          #barr_f_pos, barr_f_neg, barr_f,
                           barr_g_pos, barr_g_neg, barr_g,
                           barr_h_pos, barr_h_neg, barr_h,
                           barr_i_pos, barr_i_neg, barr_i,
                           barr_w_pos, barr_w_neg, barr_w,
-                          barr_x_pos, barr_x_neg, barr_x,
+                          #barr_x_pos, barr_x_neg, barr_x,
                           barr_y_pos, barr_y_neg, barr_y,
                           barr_z_pos, barr_z_neg, barr_z,
                           out):
     if nubar > 0:
-        out[0] = nominal_nu_flux[0] * mod_factor(0,
+      out[0] = nominal_nu_flux[0]+add_barr(5, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          #barr_x_pos, barr_x_neg, barr_x,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+      out[1] = nominal_nu_flux[1]+add_barr(1, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          #barr_x_pos, barr_x_neg, barr_x,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+    else: 
+      out[0] = nominal_nubar_flux[0]+add_barr(7, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          #barr_x_pos, barr_x_neg, barr_x,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+      out[1] = nominal_nubar_flux[1]+add_barr(3, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          #barr_x_pos, barr_x_neg, barr_x,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+    #if nubar > 0:
+    #    out[0] = nominal_nu_flux[0] * mod_factor(0,
                                                  #barr_a_pos, barr_a_neg, barr_a,
                                                  #barr_b_pos, barr_b_neg, barr_b,
                                                  #barr_c_pos, barr_c_neg, barr_c,
                                                  #barr_d_pos, barr_d_neg, barr_d,
-                                                 barr_e_pos, barr_e_neg, barr_e,
-                                                 barr_f_pos, barr_f_neg, barr_f,
-                                                 barr_g_pos, barr_g_neg, barr_g,
-                                                 barr_h_pos, barr_h_neg, barr_h,
-                                                 barr_i_pos, barr_i_neg, barr_i,
-                                                 barr_w_pos, barr_w_neg, barr_w,
-                                                 barr_x_pos, barr_x_neg, barr_x,
-                                                 barr_y_pos, barr_y_neg, barr_y,
-                                                 barr_z_pos, barr_z_neg, barr_z,
-                                                 )
-        out[1] = nominal_nu_flux[1] * mod_factor(4,
+                                                 #barr_e_pos, barr_e_neg, barr_e,
+                                                 #barr_f_pos, barr_f_neg, barr_f,
+    #                                             barr_g_pos, barr_g_neg, barr_g,
+    #                                             barr_h_pos, barr_h_neg, barr_h,
+    #                                             barr_i_pos, barr_i_neg, barr_i,
+    #                                             barr_w_pos, barr_w_neg, barr_w,
+                                                 #barr_x_pos, barr_x_neg, barr_x,
+    #                                             barr_y_pos, barr_y_neg, barr_y,
+    #                                             barr_z_pos, barr_z_neg, barr_z,
+    #                                             )
+    #    out[1] = nominal_nu_flux[1] * mod_factor(4,
                                                  #barr_a_pos, barr_a_neg, barr_a,
                                                  #barr_b_pos, barr_b_neg, barr_b,
                                                  #barr_c_pos, barr_c_neg, barr_c,
                                                  #barr_d_pos, barr_d_neg, barr_d,
-                                                 barr_e_pos, barr_e_neg, barr_e,
-                                                 barr_f_pos, barr_f_neg, barr_f,
-                                                 barr_g_pos, barr_g_neg, barr_g,
-                                                 barr_h_pos, barr_h_neg, barr_h,
-                                                 barr_i_pos, barr_i_neg, barr_i,
-                                                 barr_w_pos, barr_w_neg, barr_w,
-                                                 barr_x_pos, barr_x_neg, barr_x,
-                                                 barr_y_pos, barr_y_neg, barr_y,
-                                                 barr_z_pos, barr_z_neg, barr_z,
-                                                 )
-    else:
-        out[0] = nominal_nubar_flux[0] * mod_factor(2,
+                                                 #barr_e_pos, barr_e_neg, barr_e,
+                                                 #barr_f_pos, barr_f_neg, barr_f,
+     #                                            barr_g_pos, barr_g_neg, barr_g,
+     #                                            barr_h_pos, barr_h_neg, barr_h,
+     #                                            barr_i_pos, barr_i_neg, barr_i,
+     #                                            barr_w_pos, barr_w_neg, barr_w,
+     #                                            #barr_x_pos, barr_x_neg, barr_x,
+     #                                            barr_y_pos, barr_y_neg, barr_y,
+     #                                            barr_z_pos, barr_z_neg, barr_z,
+      #                                           )
+    #else:
+        #out[0] = nominal_nubar_flux[0] * mod_factor(2,
                                                     #barr_a_pos, barr_a_neg, barr_a,
                                                     #barr_b_pos, barr_b_neg, barr_b,
                                                     #barr_c_pos, barr_c_neg, barr_c,
                                                     #barr_d_pos, barr_d_neg, barr_d,
-                                                    barr_e_pos, barr_e_neg, barr_e,
-                                                    barr_f_pos, barr_f_neg, barr_f,
-                                                    barr_g_pos, barr_g_neg, barr_g,
-                                                    barr_h_pos, barr_h_neg, barr_h,
-                                                    barr_i_pos, barr_i_neg, barr_i,
-                                                    barr_w_pos, barr_w_neg, barr_w,
-                                                    barr_x_pos, barr_x_neg, barr_x,
-                                                    barr_y_pos, barr_y_neg, barr_y,
-                                                    barr_z_pos, barr_z_neg, barr_z,
-                                                    )
-        out[1] = nominal_nubar_flux[1] * mod_factor(6,
+                                                    #barr_e_pos, barr_e_neg, barr_e,
+                                                    #barr_f_pos, barr_f_neg, barr_f,
+         #                                           barr_g_pos, barr_g_neg, barr_g,
+         #                                           barr_h_pos, barr_h_neg, barr_h,
+         #                                           barr_i_pos, barr_i_neg, barr_i,
+         #                                           barr_w_pos, barr_w_neg, barr_w,
+                                                    #barr_x_pos, barr_x_neg, barr_x,
+         #                                           barr_y_pos, barr_y_neg, barr_y,
+         #                                           barr_z_pos, barr_z_neg, barr_z,
+         #                                           )
+        #out[1] = nominal_nubar_flux[1] * mod_factor(6,
                                                     #barr_a_pos, barr_a_neg, barr_a,
                                                     #barr_b_pos, barr_b_neg, barr_b,
                                                     #barr_c_pos, barr_c_neg, barr_c,
                                                     #barr_d_pos, barr_d_neg, barr_d,
-                                                    barr_e_pos, barr_e_neg, barr_e,
-                                                    barr_f_pos, barr_f_neg, barr_f,
-                                                    barr_g_pos, barr_g_neg, barr_g,
-                                                    barr_h_pos, barr_h_neg, barr_h,
-                                                    barr_i_pos, barr_i_neg, barr_i,
-                                                    barr_w_pos, barr_w_neg, barr_w,
-                                                    barr_x_pos, barr_x_neg, barr_x,
-                                                    barr_y_pos, barr_y_neg, barr_y,
-                                                    barr_z_pos, barr_z_neg, barr_z,
-                                                    )
+                                                    #barr_e_pos, barr_e_neg, barr_e,
+                                                    #barr_f_pos, barr_f_neg, barr_f,
+        #                                            barr_g_pos, barr_g_neg, barr_g,
+        #                                            barr_h_pos, barr_h_neg, barr_h,
+        #                                            barr_i_pos, barr_i_neg, barr_i,
+        #                                            barr_w_pos, barr_w_neg, barr_w,
+                                                    #barr_x_pos, barr_x_neg, barr_x,
+        #                                            barr_y_pos, barr_y_neg, barr_y,
+        #                                            barr_z_pos, barr_z_neg, barr_z,
+        #                                           )
