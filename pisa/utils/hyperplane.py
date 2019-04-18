@@ -8,8 +8,16 @@ from pisa import FTYPE, TARGET, ureg
 from pisa.utils import vectorizer, jsons
 from pisa.utils.jsons import from_json, to_json
 from pisa.core.pipeline import Pipeline
+from pisa.core.binning import MultiDimBinning
+from pisa.core.map import Map
 from numba import guvectorize, int32, float64
 
+from uncertainties import correlated_values
+
+
+'''
+Helper functions
+'''
 
 def get_num_args(func) :
     '''
@@ -24,6 +32,10 @@ def get_num_args(func) :
     else :
         return len(inspect.getargspec(func).args)
 
+
+'''
+Hyperplane functional forms
+'''
 
 def linear_hyperplane_func(p,m,out) :
     '''
@@ -40,6 +52,11 @@ def exponential_hyperplane_func(p,a,b,out) :
     result = a * np.exp(b*p)
     np.copyto(src=result,dst=out)
 
+
+
+'''
+Core hyperplane classes
+'''
 
 class Hyperplane(object) :
     '''
@@ -76,7 +93,11 @@ class Hyperplane(object) :
         self.fit_complete = False
         self.fit_maps_norm = None
         self.fit_maps_raw = None
+        self.fit_chi2 = None
+        self.fit_cov_mat = None
+        self.fit_method = None
 
+        # Serialization
         self._serializable_state = None
 
 
@@ -99,6 +120,7 @@ class Hyperplane(object) :
         # Create the fit coefficient arrays
         # Have one fit per bin
         self.intercept = np.full(self.binning.shape,self.initial_intercept,dtype=FTYPE)
+        self.intercept_sigma = np.full_like(self.intercept,np.NaN)
         for param in self.params.values() :
             param.init_fit_coefft_arrays(self.binning)
 
@@ -195,11 +217,19 @@ class Hyperplane(object) :
 
 
     @property
-    def param_nominal_values(self) :
+    def nominal_values(self) :
         return collections.OrderedDict([ (name,param.nominal_value) for name,param in self.params.items() ])
 
+    @property
+    def fit_param_values(self) :
+        return collections.OrderedDict([ (name,param.fit_param_values) for name,param in self.params.items() ])
 
-    def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True) :
+    @property
+    def num_fit_sets(self) :
+        return self.params.values()[0].num_fit_sets
+
+
+    def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True,method=None) :
         '''
         Fit the function/shape parameters 
         Writes the results directly into this data structure
@@ -227,6 +257,12 @@ class Hyperplane(object) :
         # Format things before getting started
         #
 
+        # Default fit method
+        # Choosing one that produces covariance matrix results reliably
+        self.fit_method = method
+        if self.fit_method is None :
+            self.fit_method = "lm"  # lm, trf, dogbox
+
         # Initialise hyperplane using nominal dataset
         self._init(binning=nominal_map.binning,nominal_param_values=nominal_param_values)
 
@@ -242,7 +278,7 @@ class Hyperplane(object) :
 
         # Save the param values used for fitting in the param objects (useful for plotting later)
         for name,values in param_values_dict.items() :
-            self.params[name]._fitting_sys_dataset_values = values
+            self.params[name].fit_param_values = values
 
         # Format the fit `x` values : [ [sys param 0 values], [sys param 1 values], ... ]
         x = np.asarray( param_values_dict.values(), dtype=FTYPE )
@@ -252,6 +288,9 @@ class Hyperplane(object) :
             nominal_map = maps[0] #TOOD More general, check has the expected niminal values, etc
             normed_maps = [ m/nominal_map for m in maps ]
             self.fit_maps_norm = normed_maps
+
+        # Prepare covariance matrix array
+        self.fit_cov_mat = np.full( list(self.binning.shape)+[self.num_fit_coeffts,self.num_fit_coeffts] ,np.NaN )
 
 
         #
@@ -266,7 +305,9 @@ class Hyperplane(object) :
             #
 
             # Format the fit `y` values : [ bin value 0, bin_value 1, ... ]
+            # Also get the corresonding uncertainty
             y = np.asarray([ m.nominal_values[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
+            y_sigma = np.asarray([ m.std_devs[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
 
             # Checks
             assert x.shape[0] == len(self.params)
@@ -307,6 +348,10 @@ class Hyperplane(object) :
             # Define the EPS (step length) used by the fitter
             # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
             eps = np.finfo(FTYPE).eps
+
+            #TODO finite mask
+
+            #TODO if no values in bins, skip and add NaNs to fit params
  
             # Perform fit
             #TODO rescale all params to [0,1] as we do for minimizers?
@@ -315,8 +360,11 @@ class Hyperplane(object) :
                 x,
                 y,
                 p0=p0,
-                maxfev=1000,
+                sigma=y_sigma,
+                absolute_sigma=True, #TODO check this
+                maxfev=1000, #TODO arg?
                 epsfcn=eps,
+                method=self.fit_method,
             )
 
             # Check the fit was successful
@@ -324,14 +372,54 @@ class Hyperplane(object) :
 
             #TODO uncertainties, empty bins, etc
 
-            # Write the fit results back to the hyperplane structure
+            # Use covariance matrix to get uncertainty in fit parameters
+            # Using uncertainties.correlated_values, and will extract the std shortly
+            #TODO diectly store the uarray?
+            corr_vals = correlated_values(popt,pcov)
+
+            # Write the fitted param results back to the hyperplane structure
             self.intercept[bin_idx] = popt[0]
+            self.intercept_sigma[bin_idx] = corr_vals[0].std_dev
             i = 1
             for param in self.params.values() :
                 for j in range(param.num_fit_coeffts) :
                     idx = param.get_fit_coefft_idx(bin_idx=bin_idx,coefft_idx=j)
                     param.fit_coeffts[idx] = popt[i]
+                    param.fit_coeffts_sigma[idx] = corr_vals[i].std_dev
                     i += 1
+
+            # Store the covariance matrix
+            self.fit_cov_mat[bin_idx] = pcov #TODO copyto?
+
+
+        #
+        # chi2
+        #
+
+        # Compare the result of the fitted hyperplane function with the actual data points used for fitting
+        # Compute the resulting chi2 to have an estimate of the fit quality
+
+        self.fit_chi2 = []
+
+        # Loop over datasets
+        for i_set in range(self.num_fit_sets) :
+
+            # Get expected bin values according tohyperplane value
+            predicted = self.evaluate({ name:values[i_set] for name,values in param_values_dict.items() })
+
+            # Get the observed value
+            observed = self.fit_maps[i_set].nominal_values
+            sigma = self.fit_maps[i_set].std_devs
+
+            # Compute chi2
+            chi2 = ((predicted - observed) / sigma) ** 2
+
+            # Add to container
+            self.fit_chi2.append(chi2)
+
+        # Combine into single array
+        self.fit_chi2 = np.stack(self.fit_chi2,axis=-1).astype(FTYPE)
+
 
         #
         # Done
@@ -348,7 +436,7 @@ class Hyperplane(object) :
 
         assert param_name in self.param_names
 
-        num_fitting_datasets = self.params.values()[0]._fitting_sys_dataset_values.size
+        num_fitting_datasets = self.params.values()[0].fit_param_values.size
         on_axis_mask = np.ones((num_fitting_datasets,),dtype=bool)
 
         # Loop over sys params
@@ -358,7 +446,7 @@ class Hyperplane(object) :
             if param.name  != param_name :
 
                 # Define a "nominal" mask
-                on_axis_mask = on_axis_mask & np.isclose(param._fitting_sys_dataset_values,param.nominal_value) 
+                on_axis_mask = on_axis_mask & np.isclose(param.fit_param_values,param.nominal_value) 
 
         return on_axis_mask
 
@@ -387,6 +475,44 @@ class Hyperplane(object) :
 
 
     @property
+    def num_fit_sets(self) :
+        return len(self.fit_param_values.values()[0])
+
+
+    @property
+    def num_fit_coeffts(self) :
+        '''
+        Return the total number of coefficients to fit
+        This is the overall intercept, plus the coefficients for each individual param
+        '''
+        return int( 1 + np.sum([ param.num_fit_coeffts for param in self.params.values() ]) )
+
+
+    @property
+    def fit_coeffts(self) :
+        '''
+        Return all coefficients, in all bins, as a single array
+        This is the overall intercept, plus the coefficients for each individual param
+        Dimensions are: [binning ..., fit coeffts]
+        '''
+        
+        array = [self.intercept]
+        for param in self.params.values() :
+            for i in range(param.num_fit_coeffts) :
+                array.append( param.get_fit_coefft(coefft_idx=i) )
+        array = np.stack(array,axis=-1)
+        return array
+
+
+    @property
+    def fit_coefft_labels(self) :
+        '''
+        Return labels for each fit coefficient
+        '''
+        return ["intercept"] + [ "%s p%i"%(param.name,i) for param in self.params.values() for i in range(param.num_fit_coeffts) ]
+
+
+    @property
     def serializable_state(self):
         """OrderedDict containing savable state attributes"""
 
@@ -395,12 +521,16 @@ class Hyperplane(object) :
             state = collections.OrderedDict()
 
             state["_initialized"] = self._initialized
-            state["fit_complete"] = self.fit_complete
-            state["fit_maps_norm"] = self.fit_maps_norm
-            state["fit_maps_raw"] = self.fit_maps_raw
             state["binning"] = self.binning.serializable_state
             state["initial_intercept"] = self.initial_intercept
             state["intercept"] = self.intercept
+            state["intercept_sigma"] = self.intercept_sigma
+            state["fit_complete"] = self.fit_complete
+            state["fit_maps_norm"] = self.fit_maps_norm
+            state["fit_maps_raw"] = self.fit_maps_raw
+            state["fit_chi2"] = self.fit_chi2
+            state["fit_cov_mat"] = self.fit_cov_mat
+            state["fit_method"] = self.fit_method
 
             state["params"] = collections.OrderedDict()
             for name,param in self.params.items() :
@@ -448,7 +578,7 @@ class Hyperplane(object) :
             # Create the param
             param = HyperplaneParam(
                 name=param_state.pop("name"),
-                func_name=param_state.pop("_func_name"),
+                func_name=param_state.pop("func_name"),
                 initial_fit_coeffts=param_state.pop("initial_fit_coeffts"),
             )
 
@@ -487,6 +617,23 @@ class Hyperplane(object) :
         return hyperplane
 
 
+    def smooth(self,method="gauss") :
+        '''
+        Apply smoothing between bins for hyperplane coefficients
+        '''
+
+        pass #TODO implement
+
+        #TODO see work done for Upgrade oscillations analsis along these lines
+
+        # # Smooth the params across neighbouring bins
+        # if smooth == 'gauss':
+        #     hyperplanes["hyperplanes"][map_name]["fit_params_smooth"] = np.full_like(hyperplanes["hyperplanes"][map_name]["fit_params"],np.NaN) 
+        #     for i_fit_param in range(num_params) :
+        #         finite_mask = np.isfinite(hyperplanes["hyperplanes"][map_name]["fit_params"][...,i_fit_param])
+        #         hyperplanes["hyperplanes"][map_name]["fit_params_smooth"][...,i_fit_param][finite_mask] = gaussian_filter(hyperplanes["hyperplanes"][map_name]["fit_params"][...,i_fit_param][finite_mask],sigma=1.)
+
+
 class HyperplaneParam(object) :
     '''
     A class defining the systematic parameter in the hyperplane
@@ -499,16 +646,18 @@ class HyperplaneParam(object) :
         self.name = name
 
         # Handle functional form fit parameters
-        self.fit_coeffts = None # Fir params container, not yet populated
+        self.fit_coeffts = None # Fit params container, not yet populated
+        self.fit_coeffts_sigma = None # Fit param sigma container, not yet populated
         self.initial_fit_coeffts = initial_fit_coeffts # The initial values for the fit parameters
 
         # Record information relating to the fitting
-        self._fitted = False # Flag indicating whether fit has been performed
-        self._fitting_sys_dataset_values = None # The values of this sys param in each of the fitting datasets
+        self.fitted = False # Flag indicating whether fit has been performed
+        self.fit_param_values = None # The values of this sys param in each of the fitting datasets
 
         # Placeholder for nominal value
         self.nominal_value = None
 
+        # Serialization
         self._serializable_state = None
 
 
@@ -517,8 +666,8 @@ class HyperplaneParam(object) :
         #
 
         # Get the function
-        self._func_name = func_name
-        self._func = self.get_func(self._func_name)
+        self.func_name = func_name
+        self._func = self.get_func(self.func_name)
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
@@ -548,12 +697,12 @@ class HyperplaneParam(object) :
 
         # Form the expected function name
         hyperplane_func_suffix = "_hyperplane_func"
-        full_func_name = func_name + hyperplane_func_suffix
+        fullfunc_name = func_name + hyperplane_func_suffix
 
         # Find all functions
         all_hyperplane_functions = { k:v for k,v in globals().items() if k.endswith(hyperplane_func_suffix) }
-        assert full_func_name in all_hyperplane_functions, "Cannot find hyperplane function '%s', choose from %s" % (func_name,[f.split(hyperplane_func_suffix)[0] for f in all_hyperplane_functions])
-        return all_hyperplane_functions[full_func_name]
+        assert fullfunc_name in all_hyperplane_functions, "Cannot find hyperplane function '%s', choose from %s" % (func_name,[f.split(hyperplane_func_suffix)[0] for f in all_hyperplane_functions])
+        return all_hyperplane_functions[fullfunc_name]
 
 
     def init_fit_coefft_arrays(self,binning) :
@@ -562,8 +711,6 @@ class HyperplaneParam(object) :
         Have one fit per bin, for each parameter
         The shape of the `self.fit_coeffts` arrays is: (binning shape ..., num fit params )
         '''
-
-        print "+++ init_fit_coefft_arrays : %s" % self.name
 
         arrays = []
 
@@ -575,8 +722,7 @@ class HyperplaneParam(object) :
             arrays.append(fit_coefft_array)
 
         self.fit_coeffts = np.stack(arrays,axis=-1)
-
-
+        self.fit_coeffts_sigma = np.full_like(self.fit_coeffts,np.NaN)
 
 
     def evaluate(self,param,out,bin_idx=None) :
@@ -650,12 +796,13 @@ class HyperplaneParam(object) :
 
             state = collections.OrderedDict()
             state["name"] = self.name
-            state["_func_name"] = self._func_name
+            state["func_name"] = self.func_name
             state["num_fit_coeffts"] = self.num_fit_coeffts
             state["fit_coeffts"] = self.fit_coeffts
+            state["fit_coeffts_sigma"] = self.fit_coeffts_sigma
             state["initial_fit_coeffts"] = self.initial_fit_coeffts
-            state["_fitted"] = self._fitted
-            state["_fitting_sys_dataset_values"] = self._fitting_sys_dataset_values
+            state["fitted"] = self.fitted
+            state["fit_param_values"] = self.fit_param_values
             state["binning_shape"] = self.binning_shape
             state["nominal_value"] = self.nominal_value
 
@@ -664,7 +811,9 @@ class HyperplaneParam(object) :
         return self._serializable_state 
 
 
-
+'''
+Hyperplane fitting and loading
+'''
 
 def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_file,combine_regex=None) :
     '''
@@ -780,6 +929,69 @@ def load_hyperplanes(input_file) :
 
 
 
+'''
+Plotting
+'''
+
+def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_nominal=True) :
+
+    import matplotlib.pyplot as plt
+
+    # Get the param
+    param = hyperplane.params[param_name]
+
+    # Default color
+    if color is None :
+        color = "red"
+
+    # Check bin index
+    assert len(bin_idx) == len(hyperplane.binning.shape)
+
+    # Get bin values for this bin only
+    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hyperplane.fit_maps ]
+    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hyperplane.fit_maps ]
+
+    # Define a mask for selecting on-axis points only
+    on_axis_mask = hyperplane.get_on_axis_mask(param.name)
+
+    # Plot the points from the datasets used for fitting
+    x = np.asarray(param.fit_param_values)[on_axis_mask]
+    y = np.asarray(chosen_bin_values)[on_axis_mask]
+    yerr = np.asarray(chosen_bin_sigma)[on_axis_mask]
+    ax.errorbar( x=x, y=y, yerr=yerr, marker="o", color=color, linestyle="None", label=label )
+
+    # Plot the hyperplane
+    # Generate as bunch of values along the sys param axis to make the plot
+    # Then calculate the hyperplane value at each point, using the nominal values for all other sys params
+    x_plot = np.linspace( np.nanmin(x), np.nanmax(x), num=100 )
+    params_for_plot = { param.name : x_plot, }
+    for p in hyperplane.params.values() :
+        if p.name != param.name :
+            params_for_plot[p.name] = np.full_like(x_plot,hyperplane.nominal_values[p.name])
+    y_plot = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
+    ax.plot( x_plot, y_plot, color=color )
+
+    #TODO Add fit uncertainty. Problem using uarrays with np.exp at the minute, may need to shift to bin-wise calc...
+    # ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt)-unp.std_devs(y_opt), unp.nominal_values(y_opt)+unp.std_devs(y_opt), color='red', alpha=0.2 )
+
+    # # Optonal : For testing, overlay the uncertainty one would find under the assumption fit parameters are uncorrelated
+    # # Typically straight line fit parameters are strongly correlated, so expect this to be a large overestimation
+    # if False :
+    #     cov_mat = fit_results["hyperplanes"][map_name]["cov_matrices"][:,:,zind][idx]
+    #     fit_params_uncorr = unp.uarray( unp.nominal_values(fit_params) , np.sqrt(np.diag(cov_mat)) )
+    #     y_opt_uncorr = hyperplane_fun(curve_x, *fit_params_uncorr)
+    #     ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt_uncorr)-unp.std_devs(y_opt_uncorr), unp.nominal_values(y_opt_uncorr)+unp.std_devs(y_opt_uncorr), color='blue', alpha=0.5 )
+
+    # Mark the nominal value
+    if show_nominal :
+        ax.axvline( x=param.nominal_value, color="blue", alpha=0.5, linestyle="--", label="Nominal" )
+
+    # Format ax
+    ax.set_xlabel(param.name)
+    ax.grid(True)
+    ax.legend()
+
+
 if __name__ == "__main__" : 
 
     import sys
@@ -814,8 +1026,8 @@ if __name__ == "__main__" :
 
     # Define binning
     from pisa.core.binning import OneDimBinning, MultiDimBinning
-    # binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=3,units=ureg.GeV,is_lin=True)])
-    binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=2,units=ureg.GeV,is_lin=True),OneDimBinning(name="reco_coszen",domain=[-1.,1.],num_bins=3,is_lin=True)])
+    binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=3,units=ureg.GeV,is_lin=True)])
+    # binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=2,units=ureg.GeV,is_lin=True),OneDimBinning(name="reco_coszen",domain=[-1.,1.],num_bins=3,is_lin=True)])
 
     # Define the values for the parameters for each dataset
     nom_param_values = {
@@ -847,12 +1059,14 @@ if __name__ == "__main__" :
     print true_hyperplane.report()
 
     # Create each dataset, e.g. set the systematic parameter values, calculate a bin count
-    nom_map = Map(name=particle_key,binning=binning,hist=true_hyperplane.evaluate(nom_param_values))
+    hist = true_hyperplane.evaluate(nom_param_values)
+    nom_map = Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist))
     sys_maps = []
     sys_param_values = []
     for i in range(num_sys_datasets) :
         sys_param_values.append( { name:sys_param_values_dict[name][i] for name in true_hyperplane.params.keys() } )
-        sys_maps.append( Map(name=particle_key,binning=binning,hist=true_hyperplane.evaluate(sys_param_values[-1])) )
+        hist = true_hyperplane.evaluate(sys_param_values[-1])
+        sys_maps.append( Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist)) )
 
 
     #
@@ -904,59 +1118,28 @@ if __name__ == "__main__" :
 
     import matplotlib.pyplot as plt
 
-    def plot_bin_fits(hyperplane,bin_idx) :
+    # Create the figure
+    fig,ax = plt.subplots(1,len(hyperplane.params))
 
-        # Create the figure
-        fig,ax = plt.subplots(1,len(hyperplane.params))
+    # Choose an arbitrary bin for plotting
+    bin_idx = tuple([ 0 for i in range(hyperplane.binning.num_dims) ])
 
-        # Get bin values for this bin only
-        #TODO errors
-        chosen_bin_values = [ m.nominal_values[bin_idx] for m in hyperplane.fit_maps ]
+    # Plot each param
+    for i,param in enumerate(hyperplane.params.values()) :
 
-        # Loop over systematics
-        for i_sys,param in enumerate(hyperplane.params.values()) :
+        plot_ax = ax if len(hyperplane.params) == 1 else ax[i]
 
-            # Get the plot ax
-            plot_ax = ax if len(hyperplane.params) == 1 else ax[i_sys]
+        plot_bin_fits(
+            ax=plot_ax,
+            hyperplane=hyperplane,
+            bin_idx=bin_idx,
+            param_name=param.name,
+        )
 
-            # Define a mask for selecting on-axis points only
-            on_axis_mask = hyperplane.get_on_axis_mask(param.name)
+    # Format
+    fig.tight_layout()
 
-            # Plot the points from the datasets used for fitting
-            x = np.asarray(param._fitting_sys_dataset_values)[on_axis_mask]
-            y = np.asarray(chosen_bin_values)[on_axis_mask]
-            plot_ax.scatter( x, y, marker="o", color="black", label="Datasets (on-axis)" )
-
-            # Plot the hyperplane
-            # Generate as bunch of values along the sys param axis to make the plot
-            # Then calculate the hyperplane value at each point, using the nominal values for all other sys params
-            x_plot = np.linspace( np.nanmin(x), np.nanmax(x), num=100 )
-            params_for_plot = { param.name : x_plot, }
-            for p in hyperplane.params.values() :
-                if p.name != param.name :
-                    params_for_plot[p.name] = np.full_like(x_plot,hyperplane.param_nominal_values[p.name])
-            y_plot = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
-            plot_ax.plot( x_plot, y_plot, color="red", label="Fit" )
-
-            # Mark the nominal value
-            plot_ax.axvline( x=param.nominal_value, color="blue", alpha=0.5, linestyle="--", label="Nominal" )
-
-            # Format ax
-            plot_ax.set_xlabel(param.name)
-            plot_ax.grid(True)
-            plot_ax.legend()
-
-        # Format fig
-        fig.tight_layout()
-
-        return fig
-
- 
-    fig = plot_bin_fits(
-        hyperplane=hyperplane,
-        bin_idx=tuple([ 0 for i in range(binning.num_dims) ]),
-    )
-
+    # Save
     fig_file_path = "hyperplane.pdf"
     fig.savefig(fig_file_path)
     print("Figure saved : %s" % fig_file_path)
