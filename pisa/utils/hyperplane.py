@@ -1,18 +1,20 @@
+import os, sys, collections, copy, inspect
+
 import numpy as np
-import collections, copy
 from scipy.optimize import curve_fit
 
-import inspect
-import numba
 from pisa import FTYPE, TARGET, ureg
-from pisa.utils import vectorizer, jsons
+from pisa.utils import vectorizer
 from pisa.utils.jsons import from_json, to_json
 from pisa.core.pipeline import Pipeline
 from pisa.core.binning import MultiDimBinning
 from pisa.core.map import Map
+from pisa.utils.fileio import mkdir
+
+import numba
 from numba import guvectorize, int32, float64
 
-from uncertainties import correlated_values
+from uncertainties import ufloat, correlated_values
 
 
 '''
@@ -283,14 +285,36 @@ class Hyperplane(object) :
         # Format the fit `x` values : [ [sys param 0 values], [sys param 1 values], ... ]
         x = np.asarray( param_values_dict.values(), dtype=FTYPE )
 
-        # Normalise bin values, if requested
-        if norm :
-            nominal_map = maps[0] #TOOD More general, check has the expected niminal values, etc
-            normed_maps = [ m/nominal_map for m in maps ]
-            self.fit_maps_norm = normed_maps
 
         # Prepare covariance matrix array
         self.fit_cov_mat = np.full( list(self.binning.shape)+[self.num_fit_coeffts,self.num_fit_coeffts] ,np.NaN )
+
+
+        #
+        # Normalisation
+        #
+
+        # Normalise bin values, if requested
+        if norm :
+
+            # Normalise the maps by dividing the nominal map
+            # This means the hyperplane results can be interpretted as a re-weighting factor, 
+            # relative to the nominal
+
+            # All map values are finite, but if have empty bins the nominal map will end up with 
+            # inf bins in the normalised map (divide by zero). Use a mask to handle this.
+            finite_mask = nominal_map.nominal_values != 0
+
+            # Formalise, handling inf values
+            normed_maps = []
+            for m in maps :
+                norm_m = copy.deepcopy(m)
+                norm_m.hist[finite_mask] = norm_m.hist[finite_mask] / nominal_map.hist[finite_mask]
+                norm_m.hist[~finite_mask] = ufloat(np.NaN, np.NaN)
+                normed_maps.append(norm_m)
+
+            # Store for plotting later
+            self.fit_maps_norm = normed_maps  
 
 
         #
@@ -316,76 +340,97 @@ class Hyperplane(object) :
             # Get flat list of the fit param guesses
             p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in self.params.values() for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
 
-            # Define a callback function for use with `curve_fit`
-            #   x : sys params
-            #   p : func/shape params
-            def callback(x,*p) :
 
-                #TODO Once only? What about bin_idx?
+            #
+            # Check if have valid data in this bin
+            #
 
-                # Unflatten list of the func/shape params, and write them to the hyperplane structure
-                self.intercept[bin_idx] = p[0]
-                i = 1
-                for param in self.params.values() :
-                    for j in range(param.num_fit_coeffts) :
-                        bin_fit_idx = tuple( list(bin_idx) + [j] )
-                        param.fit_coeffts[bin_fit_idx] = p[i]
-                        i += 1
+            # If have empty bins, cannot fit
+            # In particular, if the nominal map has an empty bin, it cannot be rescaled (x * 0 = 0)
+            # If this case, no need to try fitting
 
-                # Unflatten sys param values
-                params_unflattened = collections.OrderedDict()
-                for i in range(len(self.params)) :
-                    param_name = self.params.keys()[i]
-                    params_unflattened[param_name] = x[i]
+            # Check if have NaNs/Infs
+            if np.any(~np.isfinite(y)) : #TODO also handle missing sigma
 
-                return self.evaluate(params_unflattened,bin_idx=bin_idx)
+                # Not fitting, add empty variables
+                popt = np.full_like( p0, np.NaN )
+                pcov = np.NaN 
+
+            # Otherwise, fit...
+            else :
+
+
+                #
+                # Fit
+                #
+                
+                # Define a callback function for use with `curve_fit`
+                #   x : sys params
+                #   p : func/shape params
+                def callback(x,*p) :
+
+                    # Note that this is using the dynamic variable `bin_idx`, which cannot be passed as 
+                    # an arg as `curve_fit` cannot handle fixed parameters.
+
+                    # Unflatten list of the func/shape params, and write them to the hyperplane structure
+                    self.intercept[bin_idx] = p[0]
+                    i = 1
+                    for param in self.params.values() :
+                        for j in range(param.num_fit_coeffts) :
+                            bin_fit_idx = tuple( list(bin_idx) + [j] )
+                            param.fit_coeffts[bin_fit_idx] = p[i]
+                            i += 1
+
+                    # Unflatten sys param values
+                    params_unflattened = collections.OrderedDict()
+                    for i in range(len(self.params)) :
+                        param_name = self.params.keys()[i]
+                        params_unflattened[param_name] = x[i]
+
+                    return self.evaluate(params_unflattened,bin_idx=bin_idx)
+
+
+                # Define the EPS (step length) used by the fitter
+                # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
+                eps = np.finfo(FTYPE).eps
+     
+                # Perform fit
+                #TODO rescale all params to [0,1] as we do for minimizers?
+                popt, pcov = curve_fit(
+                    callback,
+                    x,
+                    y,
+                    p0=p0,
+                    sigma=y_sigma,
+                    absolute_sigma=True, #TODO check this is really what we want
+                    maxfev=1000, #TODO arg?
+                    epsfcn=eps, #TODO Not supported all all `method`s
+                    method=self.fit_method,
+                )
+
+                # Check the fit was successful
+                #TODO
 
 
             #
-            # Fit
+            # Re-format fit results
             #
-
-            # Define the EPS (step length) used by the fitter
-            # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
-            eps = np.finfo(FTYPE).eps
-
-            #TODO finite mask
-
-            #TODO if no values in bins, skip and add NaNs to fit params
- 
-            # Perform fit
-            #TODO rescale all params to [0,1] as we do for minimizers?
-            popt, pcov = curve_fit(
-                callback,
-                x,
-                y,
-                p0=p0,
-                sigma=y_sigma,
-                absolute_sigma=True, #TODO check this
-                maxfev=1000, #TODO arg?
-                epsfcn=eps,
-                method=self.fit_method,
-            )
-
-            # Check the fit was successful
-            #TODO
-
-            #TODO uncertainties, empty bins, etc
 
             # Use covariance matrix to get uncertainty in fit parameters
-            # Using uncertainties.correlated_values, and will extract the std shortly
-            #TODO diectly store the uarray?
-            corr_vals = correlated_values(popt,pcov)
+            # Using uncertainties.correlated_values, and will extract the std dev (including correlations) shortly
+            # Fit may fail to determine covariance matrix (method-dependent), so only do this if have a finite covariance matrix
+            corr_vals = correlated_values(popt,pcov) if np.all(np.isfinite(pcov)) else None
 
-            # Write the fitted param results back to the hyperplane structure
-            self.intercept[bin_idx] = popt[0]
-            self.intercept_sigma[bin_idx] = corr_vals[0].std_dev
-            i = 1
+            # Write the fitted param results (and sigma, if available) back to the hyperplane structure
+            i = 0
+            self.intercept[bin_idx] = popt[i]
+            self.intercept_sigma[bin_idx] = np.NaN if corr_vals is None else corr_vals[i].std_dev
+            i += 1
             for param in self.params.values() :
                 for j in range(param.num_fit_coeffts) :
                     idx = param.get_fit_coefft_idx(bin_idx=bin_idx,coefft_idx=j)
                     param.fit_coeffts[idx] = popt[i]
-                    param.fit_coeffts_sigma[idx] = corr_vals[i].std_dev
+                    param.fit_coeffts_sigma[idx] = np.NaN if corr_vals is None else corr_vals[i].std_dev
                     i += 1
 
             # Store the covariance matrix
@@ -560,7 +605,7 @@ class Hyperplane(object) :
         # If it is not already a a state, alternativey try to load it in case a JSON file was passed
         if not isinstance(state,collections.Mapping) :
             try :
-                state = jsons.from_json(state)
+                state = from_json(state)
             except:
                 raise IOError("Could not load state")
 
@@ -815,7 +860,7 @@ class HyperplaneParam(object) :
 Hyperplane fitting and loading
 '''
 
-def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_file,combine_regex=None) :
+def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_regex=None) :
     '''
     Function for fitting hyperplanes to simulation dataset
     '''
@@ -827,6 +872,12 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_file,combine_rege
     #
 
     #TODO
+
+    print("Hyperplane fit details :")
+    print("  Num params           : %i" % len(params) )
+    # print("  Num fit coefficients : %i")
+    print("  Num datasets         : 1 nominal  + %i systematics" % len(sys_datasets) )
+    print("  Nominal values       : %s" % nominal_dataset["sys_params"] )
 
 
     #
@@ -888,7 +939,7 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_file,combine_rege
             nominal_param_values=nominal_param_values,
             sys_maps=sys_maps,
             sys_param_values=sys_param_values,
-            norm=False,
+            norm=True,
         )
 
         # Report the results
@@ -903,8 +954,19 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_file,combine_rege
     # Store results
     #
 
+    # Create a file name
+    num_dims = len(hyperplane.params)
+    param_str = "_".join(hyperplane.param_names)
+    output_file = "%s__hyperplane_fits__%dd__%s.json" % (tag, num_dims, param_str)
+    output_path = os.path.join(output_dir,output_file)
+
+    # Create the output directory
+    mkdir(output_dir)
+
     # Write to a json file
-    to_json(hyperplanes,output_file)
+    to_json(hyperplanes,output_path)
+
+    print("Fit results written : %s" % output_path)
 
 
 
