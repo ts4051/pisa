@@ -15,6 +15,7 @@ import numba
 from numba import guvectorize, int32, float64
 
 from uncertainties import ufloat, correlated_values
+from uncertainties import unumpy as unp
 
 
 '''
@@ -231,7 +232,7 @@ class Hyperplane(object) :
         return self.params.values()[0].num_fit_sets
 
 
-    def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True,method=None) :
+    def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True,method=None,smooth=False,smooth_kw=None) :
         '''
         Fit the function/shape parameters 
         Writes the results directly into this data structure
@@ -275,7 +276,7 @@ class Hyperplane(object) :
         # Store raw maps
         self.fit_maps_raw = maps
 
-        # Convert params valus from `list of dicts` to `dict of lists`
+        # Convert params values from `list of dicts` to `dict of lists`
         param_values_dict = { name:np.array([ p[name] for p in param_values ]) for name in param_values[0].keys() }
 
         # Save the param values used for fitting in the param objects (useful for plotting later)
@@ -288,6 +289,36 @@ class Hyperplane(object) :
 
         # Prepare covariance matrix array
         self.fit_cov_mat = np.full( list(self.binning.shape)+[self.num_fit_coeffts,self.num_fit_coeffts] ,np.NaN )
+
+ 
+        #
+        # Smoothing
+        #
+
+        # Optionally can apply smoothing to histograms before the fit
+        # Can be useful for poorlt populated templates
+        if smooth != False :
+
+            assert isinstance(smooth,basestring)
+
+            if smooth_kw is None :
+                smooth_kw = {}
+
+            # Use Gaussian filter smoothing (useful for noisy data)
+            if smooth.lower() == "gaussian_filter" :
+
+                from scipy.ndimage.filters import gaussian_filter
+
+                assert "sigma" in smooth_kw
+                assert "order" in smooth_kw
+
+                for i,m in enumerate(self.fit_maps_raw) :
+                    new_map_state = m.serializable_state
+                    new_map_state["hist"] = gaussian_filter( m.nominal_values, sigma=smooth_kw["sigma"], order=smooth_kw["order"] )
+                    new_map_state["error_hist"] = gaussian_filter( m.std_devs, sigma=smooth_kw["sigma"], order=smooth_kw["order"] ) #TODO Not sure this is a good way to handle sigma?
+                    self.fit_maps_raw[i] = Map(**new_map_state) #TODO Store smoothed maps separately to raw version
+
+            #TODO also consider zoom smoothing?
 
 
         #
@@ -343,7 +374,31 @@ class Hyperplane(object) :
             #TODO Getting different y_sigma w.r.t. the old script, needs investigating (maybe something ro do with how the maps are normalised...)
             #TODO ALso slight difference in x/y values, but much smaller difference. Maybe use of FTYPE?
             y = np.asarray([ m.nominal_values[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
-            y_sigma = np.asarray([ m.std_devs[bin_idx] for m in self.fit_maps ], dtype=FTYPE) 
+            y_sigma = np.asarray([ m.std_devs[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
+
+            # Create a mask for keeping all these points
+            # May remove some points before fitting if find issues
+            scan_point_mask = np.ones( y.shape, dtype=bool) 
+
+            #TODO Handle cases where have as value of 0 in an element of y, and thus a sigma of 0 too. Some of the fit methods choke on the sigma=0 case. 
+            # Cases where we have a y_sigma element = 0 (normally because the corresponding y element = 0) screw up the fits (least squares divides by sigma, so get infs)
+            # Need to handle these cases here
+            # For now, I assing an new non-zero sigma value instead
+            # Could also try masking off the points, but find that I have cases where I then don't have enough sets to fit the number of parameters I need
+            #TODO Look into a good solution to this in more detail
+            bad_sigma_mask = y_sigma == 0.
+            if bad_sigma_mask.sum() > 0 :
+                y_sigma[bad_sigma_mask] = 1. #TODO What is a good number to use?
+                # scan_point_mask = scan_point_mask & (~bad_sigma_mask)
+
+            # Apply the mask to get the values I will actually use
+            x_to_use = np.array([ xx[scan_point_mask] for xx in x ])
+            y_to_use = y[scan_point_mask]
+            y_sigma_to_use = y_sigma[scan_point_mask]
+
+            # Checks
+            assert x_to_use.shape[0] == len(self.params)
+            assert x_to_use.shape[1] == y_to_use.size
 
             # #TODO REMOVE
             # #TODO REMOVE
@@ -355,10 +410,6 @@ class Hyperplane(object) :
             # #TODO REMOVE
             # #TODO REMOVE
             # #TODO REMOVE
-
-            # Checks
-            assert x.shape[0] == len(self.params)
-            assert x.shape[1] == y.size
 
             # Get flat list of the fit param guesses
             p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in self.params.values() for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
@@ -373,7 +424,7 @@ class Hyperplane(object) :
             # If this case, no need to try fitting
 
             # Check if have NaNs/Infs
-            if np.any(~np.isfinite(y)) : #TODO also handle missing sigma
+            if np.any(~np.isfinite(y_to_use)) : #TODO also handle missing sigma
 
                 # Not fitting, add empty variables
                 popt = np.full_like( p0, np.NaN )
@@ -429,18 +480,29 @@ class Hyperplane(object) :
                 #     print("  fit method  : %s" % self.fit_method)
                 #     print("<<<<<<<<<<<<<<<<<<<<<<<")
 
+                # Define some settings to use with `curve_fit` that vary with fit method
+                curve_fit_kw = {}
+                if self.fit_method == "lm" :
+                    curve_fit_kw["epsfcn"] = eps
+
+                # print ">>>>>>>>>>>>>>"
+                # for i in range(len(x)) :
+                #     print "x[%i]   : %s" % (i,x_to_use[i])
+                # print "y       : %s" % y_to_use
+                # print "y sigma : %s" % y_sigma_to_use
+
                 # Perform fit
                 #TODO rescale all params to [0,1] as we do for minimizers?
                 popt, pcov = curve_fit(
                     callback,
-                    x,
-                    y,
+                    x_to_use,
+                    y_to_use,
                     p0=p0,
-                    sigma=y_sigma,
+                    sigma=y_sigma_to_use,
                     absolute_sigma=True, #TODO check this is really what we want
-                    # maxfev=10000, #TODO arg?
-                    # epsfcn=eps, #TODO Not supported all all `method`s
+                    maxfev=1000000l, #TODO arg?
                     method=self.fit_method,
+                    **curve_fit_kw
                 )
 
                 # if bin_idx == (0,0,0) :
@@ -450,7 +512,7 @@ class Hyperplane(object) :
                 #     print("<<<<<<<<<<<<<<<<<<<<<<<")
 
                 # Check the fit was successful
-                #TODO
+                #TODO curve_fit doesn't return anything that use here, so need another method. Check on chi2 could work...
 
 
             #
@@ -911,7 +973,7 @@ class HyperplaneParam(object) :
 Hyperplane fitting and loading
 '''
 
-def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_regex=None) :
+def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_regex=None,**kw) :
     '''
     Function for fitting hyperplanes to simulation dataset
     '''
@@ -994,6 +1056,7 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
             sys_maps=sys_maps,
             sys_param_values=sys_param_values,
             norm=True,
+            **kw
         )
 
         # Report the results
@@ -1049,16 +1112,12 @@ def load_hyperplanes(input_file) :
 Plotting
 '''
 
-def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_nominal=True) :
+def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_nominal=False) :
 
     import matplotlib.pyplot as plt
 
     # Get the param
     param = hyperplane.params[param_name]
-
-    # Default color
-    if color is None :
-        color = "red"
 
     # Check bin index
     assert len(bin_idx) == len(hyperplane.binning.shape)
@@ -1074,18 +1133,18 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
     x = np.asarray(param.fit_param_values)[on_axis_mask]
     y = np.asarray(chosen_bin_values)[on_axis_mask]
     yerr = np.asarray(chosen_bin_sigma)[on_axis_mask]
-    ax.errorbar( x=x, y=y, yerr=yerr, marker="o", color=color, linestyle="None", label=label )
+    ax.errorbar( x=x, y=y, yerr=yerr, marker="o", color=("black" if color is None else color), linestyle="None", label=label )
 
     # Plot the hyperplane
     # Generate as bunch of values along the sys param axis to make the plot
     # Then calculate the hyperplane value at each point, using the nominal values for all other sys params
-    x_plot = np.linspace( np.nanmin(x), np.nanmax(x), num=100 )
+    x_plot = np.linspace( np.nanmin(param.fit_param_values), np.nanmax(param.fit_param_values), num=100 )
     params_for_plot = { param.name : x_plot, }
     for p in hyperplane.params.values() :
         if p.name != param.name :
             params_for_plot[p.name] = np.full_like(x_plot,hyperplane.nominal_values[p.name])
     y_plot = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
-    ax.plot( x_plot, y_plot, color=color )
+    ax.plot( x_plot, y_plot, color=("red" if color is None else color) )
 
     #TODO Add fit uncertainty. Problem using uarrays with np.exp at the minute, may need to shift to bin-wise calc...
     # ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt)-unp.std_devs(y_opt), unp.nominal_values(y_opt)+unp.std_devs(y_opt), color='red', alpha=0.2 )
@@ -1100,7 +1159,7 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
 
     # Mark the nominal value
     if show_nominal :
-        ax.axvline( x=param.nominal_value, color="blue", alpha=0.5, linestyle="--", label="Nominal" )
+        ax.axvline( x=param.nominal_value, color="blue", alpha=0.7, linestyle="-", label="Nominal", zorder=-1 )
 
     # Format ax
     ax.set_xlabel(param.name)
@@ -1125,27 +1184,42 @@ def plot_bin_fits_2d(ax,hyperplane,bin_idx,param_names) :
     p1 = hyperplane.params[param_names[1]]
 
     z = np.asarray(chosen_bin_values)
-    # zerr = #TODO
+    # zerr = #TODO error bars
 
-    #nominal_mask = #TODO
+    # Choose categories of points to plot
     nominal_mask = hyperplane.get_nominal_mask()
     p0_on_axis_mask = hyperplane.get_on_axis_mask(p0.name) & (~nominal_mask)
     p1_on_axis_mask = hyperplane.get_on_axis_mask(p1.name) & (~nominal_mask)
-    off_axis_mask = ~(p0_on_axis_mask | p1_on_axis_mask | nominal_mask)
 
-    ax.scatter( p0.fit_param_values[p0_on_axis_mask], p1.fit_param_values[p0_on_axis_mask], z[p0_on_axis_mask], marker="o", color="blue", label=p0.name )
-    ax.scatter( p0.fit_param_values[p1_on_axis_mask], p1.fit_param_values[p1_on_axis_mask], z[p1_on_axis_mask], marker="^", color="red", label=p1.name )
-    ax.scatter( p0.fit_param_values[off_axis_mask], p1.fit_param_values[off_axis_mask], z[off_axis_mask], marker="s", color="black", label=p1.name )
-    ax.scatter( p0.fit_param_values[nominal_mask], p1.fit_param_values[nominal_mask], z[nominal_mask], marker="*", color="magenta", label=p1.name )
+    off_axis_mask = np.ones_like(p1_on_axis_mask,dtype=bool)
+    for p in hyperplane.params.values() : # Ignore points that are off-axis for other params
+        if p.name not in param_names :
+            off_axis_mask = off_axis_mask & (p.fit_param_values == p.nominal_value)
+    off_axis_mask = off_axis_mask & ~(p0_on_axis_mask | p1_on_axis_mask | nominal_mask)
 
-    #TODO error bars
+    ax.scatter( p0.fit_param_values[p0_on_axis_mask], p1.fit_param_values[p0_on_axis_mask], z[p0_on_axis_mask], marker="o", color="blue", label="%s on-axis"%p0.name )
+    ax.scatter( p0.fit_param_values[p1_on_axis_mask], p1.fit_param_values[p1_on_axis_mask], z[p1_on_axis_mask], marker="^", color="red", label="%s on-axis"%p1.name )
+    ax.scatter( p0.fit_param_values[off_axis_mask], p1.fit_param_values[off_axis_mask], z[off_axis_mask], marker="s", color="black", label="Off-axis" )
+    ax.scatter( p0.fit_param_values[nominal_mask], p1.fit_param_values[nominal_mask], z[nominal_mask], marker="*", color="magenta", label="Nominal" )
 
-    #TODO hyperplane (as a surface)
+    # Plot hyperplane (as a surface)
+    x_plot = np.linspace( p0.fit_param_values.min(), p0.fit_param_values.max(), num=100 )
+    y_plot = np.linspace( p1.fit_param_values.min(), p1.fit_param_values.max(), num=100 )
+    x_grid, y_grid = np.meshgrid(x_plot,y_plot)
+    x_grid_flat = x_grid.flatten()
+    y_grid_flat = y_grid.flatten()
+    params_for_plot = { p0.name : x_grid_flat, p1.name : y_grid_flat, }
+    for p in hyperplane.params.values() :
+        if p.name not in params_for_plot.keys() :
+            params_for_plot[p.name] = np.full_like(x_grid_flat,hyperplane.nominal_values[p.name])
+    z_grid_flat = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
+    z_grid = z_grid_flat.reshape(x_grid.shape)
+    surf = ax.plot_surface( x_grid, y_grid, z_grid, cmap="viridis", linewidth=0, antialiased=False, alpha=0.2 )#, label="Hyperplane" )
 
+    # Format
     ax.set_xlabel(p0.name)
     ax.set_ylabel(p1.name)
-
-    #TODO legend
+    ax.legend()
 
 
 
@@ -1297,6 +1371,7 @@ if __name__ == "__main__" :
             hyperplane=hyperplane,
             bin_idx=bin_idx,
             param_name=param.name,
+            show_nominal=True,
         )
 
     # Format

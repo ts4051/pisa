@@ -102,7 +102,7 @@ class atm_muons(PiStage):
         assert self.output_mode is not None
 
         # Define the key for muon events in the data container
-        self.muon_key = "muons"
+        self.muon_key = "muon"
 
 
     def setup_function(self):
@@ -118,10 +118,10 @@ class atm_muons(PiStage):
 
         # Get variable that the flux uncertainties are spline w.r.t
         rw_variable = self.params['delta_gamma_mu_variable'].value
-        #assert rw_variable in self.data["muons"], "Cannot find the variable `%s` in the muon container, cannot interpret spline" % rw_variable #TODO Fix in container.py, `in` doesn't work...
+        #assert rw_variable in self.data[self.muon_key], "Cannot find the variable `%s` in the muon container, cannot interpret spline" % rw_variable #TODO Fix in container.py, `in` doesn't work...
 
         # Get primary CR systematic spline (using correcr FTYPE)
-        self.rw_array = self.prim_unc_spline(self.data["muons"][rw_variable]).astype(FTYPE)
+        self.rw_array = self.prim_unc_spline(self.data[self.muon_key][rw_variable]).astype(FTYPE)
 
         # Reweighting term is positive-only by construction, so normalise
         # it by shifting the whole array down by a normalisation factor
