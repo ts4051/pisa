@@ -998,12 +998,12 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
     # Run all pipelines
     #
 
-    # Run the nominal and systematics pipelines
-    #TODO maybe DistributionMaker
-    nominal_dataset["pipeline"] = Pipeline(nominal_dataset["pipeline"])
+    # Create and run the nominal and systematics pipelines (using the pipeline configs provided)
+    #TODO DistributionMaker
+    nominal_dataset["pipeline"] = Pipeline(nominal_dataset["pipeline_cfg"])
     nominal_dataset["mapset"] = nominal_dataset["pipeline"].get_outputs() #return_sum=False)
     for sys_dataset in sys_datasets :
-        sys_dataset["pipeline"] = Pipeline(sys_dataset["pipeline"])
+        sys_dataset["pipeline"] = Pipeline(sys_dataset["pipeline_cfg"])
         sys_dataset["mapset"] = sys_dataset["pipeline"].get_outputs() #return_sum=False)
 
     # Merge maps according to the combine regex, is one was provided
