@@ -1,11 +1,9 @@
-# pylint: disable=not-callable
+
 """
-Stage to implement the the systematic flux variations based on the
-Barr scheme and evaluate with MCEq
+Stage to implement the intrimsic neutrino flux as calculated with MCEq, 
+and the systematic flux variations based on the Barr scheme. 
 
 It requires spline tables created by the `$PISA/scripts/create_barr_sys_tables_mceq.py`
-
-this stage is highly experimental and not yet validated or finished!
 """
 from __future__ import absolute_import, print_function, division
 
@@ -15,7 +13,6 @@ from numba import guvectorize, cuda
 import cPickle as pickle
 from bz2 import BZ2File
 from scipy.interpolate import RectBivariateSpline
-import matplotlib.pyplot as plt
 
 from pisa import FTYPE, TARGET
 from pisa.core.pi_stage import PiStage
@@ -27,9 +24,7 @@ from pisa.utils.resources import find_resource
 
 class pi_mceq_barr(PiStage):
     """
-    stage to apply Barr style flux uncertainties, obtained from tables
-    created with MCeq, these store the derivateives for each of the 12 (24)
-    barr parameters, separately
+    stage generate nominal flux from MCEq and apply Barr style flux uncertainties.
 
     Paramaters
     ----------
@@ -40,9 +35,10 @@ class pi_mceq_barr(PiStage):
 
     Notes
     -----
-
-    The table containe for each barr parameter 8 splines, these are:
-    flux nue, derivative nue, flux nuebar, derivative nuebar, flux numu, ...
+    The table consists of 2 solutions of the cascade equation per Barr variable (12) 
+    - one solution for meson and one solution for the antimeson. 
+    Each solution consists of 8 splines: idx=0,2,4,6=numu, numubar, nue, nuebar. 
+    idx=1,3,5,7=gradients of numu, numubar, nue, nuebar. 
 
     """
 
@@ -76,15 +72,19 @@ class pi_mceq_barr(PiStage):
         output_names = ()
 
         # what are the keys used from the inputs during apply
-        input_calc_keys = ('weights',
-        #                   'nominal_nu_flux',
-         #                  'nominal_nubar_flux',
+        input_calc_keys = (
                          )
         # what are keys added or altered in the calculation used during apply
-        output_calc_keys = ('sys_flux',
+        output_calc_keys = (
+                            'nominal_nu_flux',
+                            'nominal_nubar_flux',
+                            'sys_flux',
                            )
         # what keys are added or altered for the outputs during apply
-        output_apply_keys = ('sys_flux',
+        output_apply_keys = (
+                            'nominal_nu_flux',
+                            'nominal_nubar_flux',
+                            'sys_flux',
                             )
 
         # init base class
@@ -108,58 +108,34 @@ class pi_mceq_barr(PiStage):
 
     def setup_function(self):
 
+      # load MCeq tables
+      spline_tables_dict = pickle.load(BZ2File(find_resource(self.params.table_file.value)))
 
-        # load MCeq tables
-        spline_tables_dict = pickle.load(BZ2File(find_resource(self.params.table_file.value)))
+      self.data.data_specs = self.calc_specs
 
-        self.data.data_specs = self.calc_specs
-
-        for container in self.data:
-            container['sys_flux'] = np.empty((container.size, 2), dtype=FTYPE)
-
-            # Must be initialized, as this value would otherwise be added to the container in pi_honda_ip.py
-            container['nominal_nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
-            container['nominal_nubar_flux'] = np.empty((container.size, 2), dtype=FTYPE)
-            #container.add_array_data('sys_flux', np.empty((container.size, 2), dtype=FTYPE))
-
-        if self.calc_mode == 'binned':
-            # speed up calculation by adding links
-            # as layers don't care about flavour
-            self.data.link_containers('nu', ['nue_cc', 'numu_cc', 'nutau_cc',
+      if self.calc_mode == 'binned':
+        # speed up calculation by adding links
+        # as layers don't care about flavour
+        self.data.link_containers('nu', ['nue_cc', 'numu_cc', 'nutau_cc',
                                              'nue_nc', 'numu_nc', 'nutau_nc',
                                              'nuebar_cc', 'numubar_cc', 'nutaubar_cc',
                                              'nuebar_nc', 'numubar_nc', 'nutaubar_nc'])
-        #fig = plt.figure()
-
-        for container in self.data:
-            # evaluate the splines (flux and deltas) for each E/CZ point
-            # at the moment this is done on CPU, therefore we force 'host'
-            # each barr variavle is a list of 8 splines, 4 for nominal flux and 4 for barr modified flux
-            for key in spline_tables_dict.keys():
-                logging.info('Evaluating MCEq splines for %s for Barr parameter %s'%(container.name, key))
-                container['barr_'+key] = np.empty((container.size, 8), dtype=FTYPE)
-                self.eval_spline(container['true_energy'].get('host'),
+      for container in self.data:
+        container['sys_flux'] = np.empty((container.size, 2), dtype=FTYPE)
+        container['nominal_nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
+        container['nominal_nubar_flux'] = np.empty((container.size, 2), dtype=FTYPE)
+        # evaluate the splines (flux and deltas) for each E/CZ point
+        # at the moment this is done on CPU, therefore we force 'host'
+        for key in spline_tables_dict.keys():
+          logging.info('Evaluating MCEq splines for %s for Barr parameter %s'%(container.name, key))
+          container['barr_'+key] = np.empty((container.size, 8), dtype=FTYPE)
+          self.eval_spline(container['true_energy'].get('host'),
                                  container['true_coszen'].get('host'),
                                  spline_tables_dict[key],
                                  out=container['barr_'+key].get('host'))
-                container['barr_'+key].mark_changed('host')
-                # each column is a spline evaluated for each event (given energy and coszen)
+          container['barr_'+key].mark_changed('host')
 
-            # Since they are all equal, take a random barr variable 
-            container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4] # Nue splone
-            container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0] # Numu spline
-            container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6] # antinuespline
-            container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2] # antinumuspline 
-
-        #plt.scatter(container['true_energy'].get('host'),container['nominal_nu_flux'][:,1]*(container['true_energy'].get('host')**3),label='numu', color='r')
-        #plt.scatter(container['true_energy'].get('host'),container['nominal_nubar_flux'][:,1]*(container['true_energy'].get('host')**3),label='numubar', color='g')
-        #plt.scatter(container['true_energy'].get('host'),container['nominal_nu_flux'][:,0]*(container['true_energy'].get('host')**3),label='nue', color='b')
-        #plt.scatter(container['true_energy'].get('host'),container['nominal_nubar_flux'][:,0]*(container['true_energy'].get('host')**3),label='nuebar', color='k')
-
-        #plt.xscale('log')
-        #plt.legend()
-        #plt.show()
-        self.data.unlink_containers()
+      self.data.unlink_containers()
 
 
     def eval_spline(self, true_energy, true_coszen, splines, out):
@@ -170,7 +146,6 @@ class pi_mceq_barr(PiStage):
         for i in xrange(len(true_energy)):
             abs_cos = abs(true_coszen[i])
             log_e = np.log(true_energy[i])
-            #print(true_energy[i], abs_cos)
             for j in xrange(len(splines)):
                 out[i,j] = splines[j](abs_cos, log_e)[0,0]
 
@@ -178,22 +153,35 @@ class pi_mceq_barr(PiStage):
     @profile
     def compute_function(self):
 
-        self.data.data_specs = self.calc_specs
+      self.data.data_specs = self.calc_specs
 
-        #barr_a = self.params.barr_a.value.m_as('dimensionless')
-        #barr_b = self.params.barr_b.value.m_as('dimensionless')
-        #barr_c = self.params.barr_c.value.m_as('dimensionless')
-        #barr_d = self.params.barr_d.value.m_as('dimensionless')
-        #barr_e = self.params.barr_e.value.m_as('dimensionless')
-        #barr_f = self.params.barr_f.value.m_as('dimensionless')
-        barr_g = self.params.barr_g.value.m_as('dimensionless')
-        barr_h = self.params.barr_h.value.m_as('dimensionless')
-        barr_i = self.params.barr_i.value.m_as('dimensionless')
-        barr_w = self.params.barr_w.value.m_as('dimensionless')
-        #barr_x = self.params.barr_x.value.m_as('dimensionless')
-        barr_y = self.params.barr_y.value.m_as('dimensionless')
-        barr_z = self.params.barr_z.value.m_as('dimensionless')
-        for container in self.data:
+      # The nominal flux from MCEq splines
+      # Since all nominal sploines are equal, coose a random one - like c
+      for container in self.data:
+      	container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4]
+      	container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0]
+      	container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6]
+      	container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2]
+
+      #indices = [0, 1, 0, 1] # [nue, numum, nue, numu]
+      #mceq_indeces = [4, 0, 6, 2] # ['nue', 'numu', 'nuebar', 'numubar']
+
+      #barr_a = self.params.barr_a.value.m_as('dimensionless')
+      #barr_b = self.params.barr_b.value.m_as('dimensionless')
+      #barr_c = sself.params.barr_c.value.m_as('dimensionless')
+      #barr_d = self.params.barr_d.value.m_as('dimensionless')
+      #barr_e = self.params.barr_e.value.m_as('dimensionless')
+      #barr_f = self.params.barr_f.value.m_as('dimensionless')
+      barr_g = self.params.barr_g.value.m_as('dimensionless')
+      barr_h = self.params.barr_h.value.m_as('dimensionless')
+      barr_i = self.params.barr_i.value.m_as('dimensionless')
+      barr_w = self.params.barr_w.value.m_as('dimensionless')
+      #barr_x = self.params.barr_x.value.m_as('dimensionless')
+      barr_y = self.params.barr_y.value.m_as('dimensionless')
+      barr_z = self.params.barr_z.value.m_as('dimensionless')
+
+      # Apply the Barr modifications to nominal flux 
+      for container in self.data:
             apply_barr_vectorized(container['nominal_nu_flux'].get(WHERE),
                                   container['nominal_nubar_flux'].get(WHERE),
                                   container['nubar'],
@@ -214,77 +202,6 @@ class pi_mceq_barr(PiStage):
                                  )
             container['sys_flux'].mark_changed(WHERE)
 
-
-@myjit
-def delta(param, pos_f, pos_d, neg_f, neg_d):
-    ''' return fractional delta given a barr parameter and
-    the postitive and negative fluxes and derivateives
-    '''
-    print('****')
-    print('param=', param)
-    #print('pos_f=', pos_f)
-    #print('pos_d=', pos_d)
-    #print('neg_f=', neg_f)
-    #print('neg_d=', neg_d)
-    #print((pos_d / pos_f))
-    #print((neg_d / neg_f))
-    #print('=======', param * ((pos_d / pos_f) + (neg_d / neg_f)))
-    return param * ((pos_d / pos_f) + (neg_d / neg_f))
-
-@myjit
-def mod_factor(idx,
-               #barr_a_pos, barr_a_neg, barr_a,
-               #barr_b_pos, barr_b_neg, barr_b,
-               #barr_c_pos, barr_c_neg, barr_c,
-               #barr_d_pos, barr_d_neg, barr_d,
-               #barr_e_pos, barr_e_neg, barr_e,
-               #barr_f_pos, barr_f_neg, barr_f,
-               barr_g_pos, barr_g_neg, barr_g,
-               barr_h_pos, barr_h_neg, barr_h,
-               barr_i_pos, barr_i_neg, barr_i,
-               barr_w_pos, barr_w_neg, barr_w,
-               #barr_x_pos, barr_x_neg, barr_x,
-               barr_y_pos, barr_y_neg, barr_y,
-               barr_z_pos, barr_z_neg, barr_z,
-               ):
-    '''
-    calculate the modification factor for the flux
-
-    Parameters
-    ----------
-
-    idx : int
-        which Barr splines to use
-        for nue: 0
-        for nuebar: 2
-        for numu: 4
-        for numubar : 6
-
-    barr_*_pos : array of length 8
-        (nue_flux, nue_derivative, nuebar...)
-
-    barr_*_neg : array of length 8
-        same as barr_*_pos
-    
-    barr_* : floats
-        systematics value
-
-    '''
-    return 1. + (
-                 #delta(barr_a, barr_a_pos[idx], barr_a_pos[idx+1], barr_a_neg[idx], barr_a_neg[idx+1])
-                 #+ delta(barr_b, barr_b_pos[idx], barr_b_pos[idx+1], barr_b_neg[idx], barr_b_neg[idx+1])
-                 #+ delta(barr_c, barr_c_pos[idx], barr_c_pos[idx+1], barr_c_neg[idx], barr_c_neg[idx+1])
-                 #delta(barr_d, barr_d_pos[idx], barr_d_pos[idx+1], barr_d_neg[idx], barr_d_neg[idx+1])
-                 #delta(barr_e, barr_e_pos[idx], barr_e_pos[idx+1], barr_e_neg[idx], barr_e_neg[idx+1])
-                 #+ delta(barr_f, barr_f_pos[idx], barr_f_pos[idx+1], barr_f_neg[idx], barr_f_neg[idx+1])
-                 delta(barr_g, barr_g_pos[idx], barr_g_pos[idx+1], barr_g_neg[idx], barr_g_neg[idx+1])
-                 + delta(barr_h, barr_h_pos[idx], barr_h_pos[idx+1], barr_h_neg[idx], barr_h_neg[idx+1])
-                 + delta(barr_i, barr_i_pos[idx], barr_i_pos[idx+1], barr_i_neg[idx], barr_i_neg[idx+1])
-                 + delta(barr_w, barr_w_pos[idx], barr_w_pos[idx+1], barr_w_neg[idx], barr_w_neg[idx+1])
-                 #+ delta(barr_x, barr_x_pos[idx], barr_x_pos[idx+1], barr_x_neg[idx], barr_x_neg[idx+1])
-                 + delta(barr_y, barr_y_pos[idx], barr_y_pos[idx+1], barr_y_neg[idx], barr_y_neg[idx+1])
-                 + delta(barr_z, barr_z_pos[idx], barr_z_pos[idx+1], barr_z_neg[idx], barr_z_neg[idx+1])
-                 )
 @myjit
 def add_barr(idx,
                #barr_a_pos, barr_a_neg, barr_a,
@@ -302,60 +219,15 @@ def add_barr(idx,
                barr_z_pos, barr_z_neg, barr_z,
                ):
   return (0
-          +(barr_g_pos[idx]*barr_g)+(barr_g_neg[idx]*barr_g)
-          + (barr_h_pos[idx]*barr_h)+(barr_h_neg[idx]*barr_h)
-          + (barr_i_pos[idx]*barr_i)+(barr_i_neg[idx]*barr_i)
-          + (barr_w_pos[idx]*barr_w)+(barr_w_neg[idx]*barr_w)
-          + (barr_y_pos[idx]*barr_y)+(barr_y_neg[idx]*barr_y)
-          + (barr_z_pos[idx]*barr_z)+(barr_z_neg[idx]*barr_z)
+          + barr_g*(barr_g_pos[idx]+barr_g_neg[idx])
+          + barr_h*(barr_h_pos[idx]+barr_h_neg[idx])
+          + barr_i*(barr_i_pos[idx]+barr_i_neg[idx])
+          + barr_w*(barr_w_pos[idx]+barr_w_neg[idx])
+          + barr_y*(barr_y_pos[idx]+barr_y_neg[idx])
+          + barr_z*(barr_z_pos[idx]+barr_z_neg[idx])
           )
 # vectorized function to apply
 # must be outside class
-# if FTYPE == np.float64:
-#     signature = '(f8[:], f8[:], i4, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \s
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:], f8[:], f8, \
-#                   f8[:])'
-# else:
-#     signature = '(f4[:], f4[:], i4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:], f4[:], f4, \
-#                   f4[:])'
-# @guvectorize([signature], '(d),(d),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),(),\
-#                            (c),(c),()\
-#                            ->(d)', target=TARGET)
-
 if FTYPE == np.float64:
     signature = '(f8[:], f8[:], i4, \
                   f8[:], f8[:], f8, \
@@ -382,11 +254,12 @@ else:
                            (c),(c),(),\
                            (c),(c),()\
                            ->(d)', target=TARGET)
+
 def apply_barr_vectorized(nominal_nu_flux,
                           nominal_nubar_flux,
                           nubar,
-                         #barr_a_pos, barr_a_neg, barr_a,
-                         #barr_b_pos, barr_b_neg, barr_b,
+                          #barr_a_pos, barr_a_neg, barr_a,
+                          #barr_b_pos, barr_b_neg, barr_b,
                           #barr_c_pos, barr_c_neg, barr_c,
                           #barr_d_pos, barr_d_neg, barr_d,
                           #barr_e_pos, barr_e_neg, barr_e,
@@ -399,13 +272,36 @@ def apply_barr_vectorized(nominal_nu_flux,
                           barr_y_pos, barr_y_neg, barr_y,
                           barr_z_pos, barr_z_neg, barr_z,
                           out):
+    '''
+    Add Barr modification to nominal flux, i.e. take the nominal flux + barr modification spline * barr value
+
+    Parameters
+    ----------
+
+    idx : int
+        spline of gradient to Barr modification
+        for nue: 5
+        for nuebar: 7
+        for numu: 1
+        for numubar : 3
+
+    barr_*_pos : array of length 8
+        (numu_flux, numu_derivative, numubar...)
+
+    barr_*_neg : array of length 8
+        same as barr_*_pos
+    
+    barr_* : floats
+        systematics value
+
+    '''
+    # For nu, apply barr modification, which spline is idx_nue=5 and idx_nue=1
     if nubar > 0:
       out[0] = nominal_nu_flux[0]+add_barr(5, 
                                           barr_g_pos, barr_g_neg, barr_g,
                                           barr_h_pos, barr_h_neg, barr_h,
                                           barr_i_pos, barr_i_neg, barr_i,
                                           barr_w_pos, barr_w_neg, barr_w,
-                                          #barr_x_pos, barr_x_neg, barr_x,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
       out[1] = nominal_nu_flux[1]+add_barr(1, 
@@ -413,16 +309,15 @@ def apply_barr_vectorized(nominal_nu_flux,
                                           barr_h_pos, barr_h_neg, barr_h,
                                           barr_i_pos, barr_i_neg, barr_i,
                                           barr_w_pos, barr_w_neg, barr_w,
-                                          #barr_x_pos, barr_x_neg, barr_x,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
-    else: 
+    else:
+    # For antinu, apply barr modification, which spline is idx_nue=7 and idx_nue=3
       out[0] = nominal_nubar_flux[0]+add_barr(7, 
                                           barr_g_pos, barr_g_neg, barr_g,
                                           barr_h_pos, barr_h_neg, barr_h,
                                           barr_i_pos, barr_i_neg, barr_i,
                                           barr_w_pos, barr_w_neg, barr_w,
-                                          #barr_x_pos, barr_x_neg, barr_x,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
       out[1] = nominal_nubar_flux[1]+add_barr(3, 
@@ -430,68 +325,5 @@ def apply_barr_vectorized(nominal_nu_flux,
                                           barr_h_pos, barr_h_neg, barr_h,
                                           barr_i_pos, barr_i_neg, barr_i,
                                           barr_w_pos, barr_w_neg, barr_w,
-                                          #barr_x_pos, barr_x_neg, barr_x,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
-    #if nubar > 0:
-    #    out[0] = nominal_nu_flux[0] * mod_factor(0,
-                                                 #barr_a_pos, barr_a_neg, barr_a,
-                                                 #barr_b_pos, barr_b_neg, barr_b,
-                                                 #barr_c_pos, barr_c_neg, barr_c,
-                                                 #barr_d_pos, barr_d_neg, barr_d,
-                                                 #barr_e_pos, barr_e_neg, barr_e,
-                                                 #barr_f_pos, barr_f_neg, barr_f,
-    #                                             barr_g_pos, barr_g_neg, barr_g,
-    #                                             barr_h_pos, barr_h_neg, barr_h,
-    #                                             barr_i_pos, barr_i_neg, barr_i,
-    #                                             barr_w_pos, barr_w_neg, barr_w,
-                                                 #barr_x_pos, barr_x_neg, barr_x,
-    #                                             barr_y_pos, barr_y_neg, barr_y,
-    #                                             barr_z_pos, barr_z_neg, barr_z,
-    #                                             )
-    #    out[1] = nominal_nu_flux[1] * mod_factor(4,
-                                                 #barr_a_pos, barr_a_neg, barr_a,
-                                                 #barr_b_pos, barr_b_neg, barr_b,
-                                                 #barr_c_pos, barr_c_neg, barr_c,
-                                                 #barr_d_pos, barr_d_neg, barr_d,
-                                                 #barr_e_pos, barr_e_neg, barr_e,
-                                                 #barr_f_pos, barr_f_neg, barr_f,
-     #                                            barr_g_pos, barr_g_neg, barr_g,
-     #                                            barr_h_pos, barr_h_neg, barr_h,
-     #                                            barr_i_pos, barr_i_neg, barr_i,
-     #                                            barr_w_pos, barr_w_neg, barr_w,
-     #                                            #barr_x_pos, barr_x_neg, barr_x,
-     #                                            barr_y_pos, barr_y_neg, barr_y,
-     #                                            barr_z_pos, barr_z_neg, barr_z,
-      #                                           )
-    #else:
-        #out[0] = nominal_nubar_flux[0] * mod_factor(2,
-                                                    #barr_a_pos, barr_a_neg, barr_a,
-                                                    #barr_b_pos, barr_b_neg, barr_b,
-                                                    #barr_c_pos, barr_c_neg, barr_c,
-                                                    #barr_d_pos, barr_d_neg, barr_d,
-                                                    #barr_e_pos, barr_e_neg, barr_e,
-                                                    #barr_f_pos, barr_f_neg, barr_f,
-         #                                           barr_g_pos, barr_g_neg, barr_g,
-         #                                           barr_h_pos, barr_h_neg, barr_h,
-         #                                           barr_i_pos, barr_i_neg, barr_i,
-         #                                           barr_w_pos, barr_w_neg, barr_w,
-                                                    #barr_x_pos, barr_x_neg, barr_x,
-         #                                           barr_y_pos, barr_y_neg, barr_y,
-         #                                           barr_z_pos, barr_z_neg, barr_z,
-         #                                           )
-        #out[1] = nominal_nubar_flux[1] * mod_factor(6,
-                                                    #barr_a_pos, barr_a_neg, barr_a,
-                                                    #barr_b_pos, barr_b_neg, barr_b,
-                                                    #barr_c_pos, barr_c_neg, barr_c,
-                                                    #barr_d_pos, barr_d_neg, barr_d,
-                                                    #barr_e_pos, barr_e_neg, barr_e,
-                                                    #barr_f_pos, barr_f_neg, barr_f,
-        #                                            barr_g_pos, barr_g_neg, barr_g,
-        #                                            barr_h_pos, barr_h_neg, barr_h,
-        #                                            barr_i_pos, barr_i_neg, barr_i,
-        #                                            barr_w_pos, barr_w_neg, barr_w,
-                                                    #barr_x_pos, barr_x_neg, barr_x,
-        #                                            barr_y_pos, barr_y_neg, barr_y,
-        #                                            barr_z_pos, barr_z_neg, barr_z,
-        #                                           )
