@@ -67,6 +67,7 @@ class pi_mceq_barr(PiStage):
                            'barr_w',
                            'barr_y',
                            'barr_z',
+                           'delta_index',
                           )
         input_names = ()
         output_names = ()
@@ -106,11 +107,14 @@ class pi_mceq_barr(PiStage):
         assert self.calc_mode is not None
         assert self.output_mode is not None
 
+	print('----- The MCEq stage has been initialized -----')
+
     def setup_function(self):
 
       # load MCeq tables
       spline_tables_dict = pickle.load(BZ2File(find_resource(self.params.table_file.value)))
-
+      print('---- The spline tables have been loaded ----')
+      #print(spline_tables_dict.keys())
       self.data.data_specs = self.calc_specs
 
       if self.calc_mode == 'binned':
@@ -120,6 +124,8 @@ class pi_mceq_barr(PiStage):
                                              'nue_nc', 'numu_nc', 'nutau_nc',
                                              'nuebar_cc', 'numubar_cc', 'nutaubar_cc',
                                              'nuebar_nc', 'numubar_nc', 'nutaubar_nc'])
+      print('---- The containers have been linked ----')
+
       for container in self.data:
         container['sys_flux'] = np.empty((container.size, 2), dtype=FTYPE)
         container['nominal_nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
@@ -128,13 +134,15 @@ class pi_mceq_barr(PiStage):
         # at the moment this is done on CPU, therefore we force 'host'
         for key in spline_tables_dict.keys():
           logging.info('Evaluating MCEq splines for %s for Barr parameter %s'%(container.name, key))
+          #print('Evaluating MCEq splines for %s for Barr parameter %s'%(container.name, key))
           container['barr_'+key] = np.empty((container.size, 8), dtype=FTYPE)
+          #print(container['true_energy'].get('host'), container['true_coszen'].get('host'))
           self.eval_spline(container['true_energy'].get('host'),
                                  container['true_coszen'].get('host'),
                                  spline_tables_dict[key],
                                  out=container['barr_'+key].get('host'))
           container['barr_'+key].mark_changed('host')
-
+      print('---- The splines have been evaluated ----')
       self.data.unlink_containers()
 
 
@@ -144,6 +152,7 @@ class pi_mceq_barr(PiStage):
         and evlauate all 8 Barr splines at these points
         '''
         for i in xrange(len(true_energy)):
+
             abs_cos = abs(true_coszen[i])
             log_e = np.log(true_energy[i])
             for j in xrange(len(splines)):
@@ -158,13 +167,10 @@ class pi_mceq_barr(PiStage):
       # The nominal flux from MCEq splines
       # Since all nominal sploines are equal, coose a random one - like c
       for container in self.data:
-      	container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4]
-      	container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0]
-      	container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6]
-      	container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2]
-
-      #indices = [0, 1, 0, 1] # [nue, numum, nue, numu]
-      #mceq_indeces = [4, 0, 6, 2] # ['nue', 'numu', 'nuebar', 'numubar']
+      	container['nominal_nu_flux'][:,0] = container['barr_c+'].get('host')[:,4]*1e4
+      	container['nominal_nu_flux'][:,1] = container['barr_c+'].get('host')[:,0]*1e4
+      	container['nominal_nubar_flux'][:,0] = container['barr_c+'].get('host')[:,6]*1e4
+      	container['nominal_nubar_flux'][:,1] = container['barr_c+'].get('host')[:,2]*1e4
 
       #barr_a = self.params.barr_a.value.m_as('dimensionless')
       #barr_b = self.params.barr_b.value.m_as('dimensionless')
@@ -180,11 +186,15 @@ class pi_mceq_barr(PiStage):
       barr_y = self.params.barr_y.value.m_as('dimensionless')
       barr_z = self.params.barr_z.value.m_as('dimensionless')
 
+      delta_index = self.params.delta_index.value.m_as("dimensionless")
+
       # Apply the Barr modifications to nominal flux 
       for container in self.data:
             apply_barr_vectorized(container['nominal_nu_flux'].get(WHERE),
                                   container['nominal_nubar_flux'].get(WHERE),
                                   container['nubar'],
+                                  container["true_energy"].get(WHERE),
+                                  delta_index,
                                   #container['barr_a+'].get(WHERE), container['barr_a-'].get(WHERE), barr_a,
                                   #container['barr_b+'].get(WHERE), container['barr_b-'].get(WHERE), barr_b,
                                   #container['barr_c+'].get(WHERE), container['barr_c-'].get(WHERE), barr_c,
@@ -200,7 +210,31 @@ class pi_mceq_barr(PiStage):
                                   container['barr_z+'].get(WHERE), container['barr_z-'].get(WHERE), barr_z,
                                   out=container['sys_flux'].get(WHERE),
                                  )
+            #apply_delta_vectorized(
+                #container["true_energy"].get(WHERE),
+                #container['nominal_nu_flux'].get(WHERE),
+                #container['nominal_nubar_flux'].get(WHERE),
+                #delta_index,
+                #out=container["sys_flux"].get(WHERE),
+                #)
             container['sys_flux'].mark_changed(WHERE)
+
+@myjit
+def spectral_index_scale(true_energy, egy_pivot, delta_index):
+    """ calculate spectral index scale """
+    return math.pow((true_energy / egy_pivot), delta_index)
+#def apply_delta_kernel(delta_index):
+#    print('!', delta_index)
+
+#if FTYPE == np.float64: 
+#    SIGNATURE="(f8, f8[:])"
+#else: 
+#    SIGNATURE="(f4, f4[:])"
+#@guvectorize([SIGNATURE], "()->(d)", target=TARGET)
+#def apply_delta_vectorized(delta_index, out): 
+#        apply_delta_kernel(
+            #true_energy, 
+ #           delta_index)
 
 @myjit
 def add_barr(idx,
@@ -219,17 +253,17 @@ def add_barr(idx,
                barr_z_pos, barr_z_neg, barr_z,
                ):
   return (0
-          + barr_g*(barr_g_pos[idx]+barr_g_neg[idx])
-          + barr_h*(barr_h_pos[idx]+barr_h_neg[idx])
-          + barr_i*(barr_i_pos[idx]+barr_i_neg[idx])
-          + barr_w*(barr_w_pos[idx]+barr_w_neg[idx])
-          + barr_y*(barr_y_pos[idx]+barr_y_neg[idx])
-          + barr_z*(barr_z_pos[idx]+barr_z_neg[idx])
+          + barr_g*(barr_g_pos[idx]+barr_g_neg[idx])*1e4
+          + barr_h*(barr_h_pos[idx]+barr_h_neg[idx])*1e4
+          + barr_i*(barr_i_pos[idx]+barr_i_neg[idx])*1e4
+          + barr_w*(barr_w_pos[idx]+barr_w_neg[idx])*1e4
+          + barr_y*(barr_y_pos[idx]+barr_y_neg[idx])*1e4
+          + barr_z*(barr_z_pos[idx]+barr_z_neg[idx])*1e4
           )
 # vectorized function to apply
 # must be outside class
 if FTYPE == np.float64:
-    signature = '(f8[:], f8[:], i4, \
+    signature = '(f8[:], f8[:], i4, f8, f8,\
                   f8[:], f8[:], f8, \
                   f8[:], f8[:], f8, \
                   f8[:], f8[:], f8, \
@@ -238,7 +272,7 @@ if FTYPE == np.float64:
                   f8[:], f8[:], f8, \
                   f8[:])'
 else:
-    signature = '(f4[:], f4[:], i4, \
+    signature = '(f4[:], f4[:], i4, f4, f4,\
                   f4[:], f4[:], f4, \
                   f4[:], f4[:], f4, \
                   f4[:], f4[:], f4, \
@@ -246,7 +280,7 @@ else:
                   f4[:], f4[:], f4, \
                   f4[:], f4[:], f4, \
                   f4[:])'
-@guvectorize([signature], '(d),(d),(),\
+@guvectorize([signature], '(d),(d),(), (), (),\
                            (c),(c),(),\
                            (c),(c),(),\
                            (c),(c),(),\
@@ -258,6 +292,8 @@ else:
 def apply_barr_vectorized(nominal_nu_flux,
                           nominal_nubar_flux,
                           nubar,
+                          true_energy,
+                          delta_index,
                           #barr_a_pos, barr_a_neg, barr_a,
                           #barr_b_pos, barr_b_neg, barr_b,
                           #barr_c_pos, barr_c_neg, barr_c,
@@ -327,3 +363,7 @@ def apply_barr_vectorized(nominal_nu_flux,
                                           barr_w_pos, barr_w_neg, barr_w,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
+    idx_scale = spectral_index_scale(true_energy, 24.0900951261, delta_index)
+    out[0] *= idx_scale
+    out[1] *= idx_scale
+    print(idx_scale)
