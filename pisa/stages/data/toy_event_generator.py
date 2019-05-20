@@ -88,7 +88,7 @@ class toy_event_generator(PiStage):
             elif self.input_mode == 'binned':
 
                 # create variables using the grid
-                mesh = self.input_specs.meshgrid(entity="bin_edges",attach_units=False) #TODO How to enforce correct units? #TODO Use edges? entity="bin_edges"
+                mesh = self.input_specs.meshgrid(entity="midpoints",attach_units=False) #TODO How to enforce correct units? #TODO Use edges? entity="bin_edges"
                 size = mesh[0].size
                 for var_name,var_vals in zip(self.input_specs.names,mesh) :
                     container.add_array_data( var_name, var_vals.flatten().astype(FTYPE) )
