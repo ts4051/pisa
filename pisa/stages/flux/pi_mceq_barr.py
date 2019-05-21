@@ -203,13 +203,13 @@ class pi_mceq_barr(PiStage):
           #container['barr_d+'].get(WHERE), container['barr_d-'].get(WHERE), barr_d,
           #container['barr_e+'].get(WHERE), container['barr_e-'].get(WHERE), barr_e,
           #container['barr_f+'].get(WHERE), container['barr_f-'].get(WHERE), barr_f,
-          #container['barr_g+'].get(WHERE), container['barr_g-'].get(WHERE), barr_g,
-          #container['barr_h+'].get(WHERE), container['barr_h-'].get(WHERE), barr_h,
-          #container['barr_i+'].get(WHERE), container['barr_i-'].get(WHERE), barr_i,
+          container['barr_g+'].get(WHERE), container['barr_g-'].get(WHERE), barr_g,
+          container['barr_h+'].get(WHERE), container['barr_h-'].get(WHERE), barr_h,
+          container['barr_i+'].get(WHERE), container['barr_i-'].get(WHERE), barr_i,
           #container['barr_x+'].get(WHERE), container['barr_x-'].get(WHERE), barr_x,
-          #container['barr_w+'].get(WHERE), container['barr_w-'].get(WHERE), barr_w,
-          #container['barr_y+'].get(WHERE), container['barr_y-'].get(WHERE), barr_y,
-          #container['barr_z+'].get(WHERE), container['barr_z-'].get(WHERE), barr_z,
+          container['barr_w+'].get(WHERE), container['barr_w-'].get(WHERE), barr_w,
+          container['barr_y+'].get(WHERE), container['barr_y-'].get(WHERE), barr_y,
+          container['barr_z+'].get(WHERE), container['barr_z-'].get(WHERE), barr_z,
           out=container['sys_flux'].get(WHERE),
         )
         container['sys_flux'].mark_changed(WHERE)
@@ -252,35 +252,88 @@ def apply_sys_kernel(
     nominal_nubar_flux,
     nubar,
     delta_index,
+    barr_g_pos, barr_g_neg, barr_g,
+    barr_h_pos, barr_h_neg, barr_h,
+    barr_i_pos, barr_i_neg, barr_i,
+    barr_w_pos, barr_w_neg, barr_w,
+    barr_y_pos, barr_y_neg, barr_y,
+    barr_z_pos, barr_z_neg, barr_z,
     out,
 ):
 
-  new_nu_flux = cuda.local.array(shape=(2), dtype=ftype)
-  new_nubar_flux = cuda.local.array(shape=(2), dtype=ftype)
-
-  new_nu_flux = nominal_nu_flux
-  new_nubar_flux = nominal_nubar_flux
-
-  if nubar < 0:
-    out[0] = new_nu_flux[0]
-    out[1] = new_nu_flux[1]
-  else:
-    out[0] = new_nubar_flux[0]
-    out[1] = new_nubar_flux[1]
+  if nubar < 0: # If particle 
+    out[0] = nominal_nu_flux[0]+add_barr(5, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+    out[1] = nominal_nu_flux[1]+add_barr(1, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+  else: # if antiparticle 
+    out[0] = nominal_nubar_flux[0]+add_barr(7, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+    out[1] = nominal_nubar_flux[1]+add_barr(3, 
+                                          barr_g_pos, barr_g_neg, barr_g,
+                                          barr_h_pos, barr_h_neg, barr_h,
+                                          barr_i_pos, barr_i_neg, barr_i,
+                                          barr_w_pos, barr_w_neg, barr_w,
+                                          barr_y_pos, barr_y_neg, barr_y,
+                                          barr_z_pos, barr_z_neg, barr_z)
+  print(nubar, out)
 
   idx_scale = spectral_index_scale(true_energy, 24.0900951261, delta_index)
   out[0] *= idx_scale
   out[1] *= idx_scale
-  #print(idx_scale)
 
 # vectorized function to apply
-# must be outside class
+# must be outsixsde class
 if FTYPE == np.float64:
-    SIGNATURE = "(f8, f8, f8[:], f8[:], i4, f8, f8[:])"
+    #SIGNATURE = "(f8, f8, f8[:], f8[:], i4, f8, f8[:])"
+    SIGNATURE = "(f8, f8,\
+                  f8[:], f8[:],\
+                  i4, f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:], f8[:], f8,\
+                  f8[:])"
 else:
-    SIGNATURE = "(f4, f4, f4[:], f4[:], i4, f4, f4[:])"
+    #SIGNATURE = "(f4, f4, f4[:], f4[:], i4, f4, f4[:])"
+    SIGNATURE = "(f4, f4,\
+                  f4[:], f4[:],\
+                  i4, f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:], f4[:], f4,\
+                  f4[:])"
 
-@guvectorize([SIGNATURE], "(),(),(d),(d),(),()->(d)", target=TARGET)
+#@guvectorize([SIGNATURE], "(),(),(d),(d),(),()->(d)", target=TARGET)
+@guvectorize([SIGNATURE], '(),(),(d),(d),(),(),\
+                           (c),(c),(),\
+                           (c),(c),(),\
+                           (c),(c),(),\
+                           (c),(c),(),\
+                           (c),(c),(),\
+                           (c),(c),()\
+                           ->(d)', target=TARGET)
+
 def apply_sys_vectorized(
     true_energy,
     true_coszen,
@@ -288,6 +341,12 @@ def apply_sys_vectorized(
     nominal_nubar_flux,
     nubar,
     delta_index,
+    barr_g_pos, barr_g_neg, barr_g,
+    barr_h_pos, barr_h_neg, barr_h,
+    barr_i_pos, barr_i_neg, barr_i,
+    barr_w_pos, barr_w_neg, barr_w,
+    barr_y_pos, barr_y_neg, barr_y,
+    barr_z_pos, barr_z_neg, barr_z,
     out,
     ):
 
@@ -298,5 +357,11 @@ def apply_sys_vectorized(
       nominal_nubar_flux,
       nubar,
       delta_index,
+      barr_g_pos, barr_g_neg, barr_g,
+      barr_h_pos, barr_h_neg, barr_h,
+      barr_i_pos, barr_i_neg, barr_i,
+      barr_w_pos, barr_w_neg, barr_w,
+      barr_y_pos, barr_y_neg, barr_y,
+      barr_z_pos, barr_z_neg, barr_z,
       out,
       )
