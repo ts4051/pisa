@@ -297,7 +297,7 @@ class Hyperplane(object) :
 
         # Optionally can apply smoothing to histograms before the fit
         # Can be useful for poorlt populated templates
-        if not smooth :
+        if smooth :
 
             assert isinstance(smooth,basestring), "`smooth` should be a string, found %s %s" % (smooth,type(smooth)) 
 
