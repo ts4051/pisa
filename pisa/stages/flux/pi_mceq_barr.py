@@ -291,7 +291,7 @@ def apply_sys_kernel(
                                           barr_w_pos, barr_w_neg, barr_w,
                                           barr_y_pos, barr_y_neg, barr_y,
                                           barr_z_pos, barr_z_neg, barr_z)
-  print(nubar, out)
+  #print(nubar, out)
 
   idx_scale = spectral_index_scale(true_energy, 24.0900951261, delta_index)
   out[0] *= idx_scale
