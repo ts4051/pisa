@@ -297,9 +297,9 @@ class Hyperplane(object) :
 
         # Optionally can apply smoothing to histograms before the fit
         # Can be useful for poorlt populated templates
-        if smooth != False :
+        if smooth :
 
-            assert isinstance(smooth,basestring)
+            assert isinstance(smooth,basestring), "`smooth` should be a string, found %s %s" % (smooth,type(smooth)) 
 
             if smooth_kw is None :
                 smooth_kw = {}
@@ -763,7 +763,8 @@ class Hyperplane(object) :
         hyperplane.binning = MultiDimBinning(**state.pop("binning"))
 
         # Add maps
-        hyperplane.fit_maps_raw = [ Map(**map_state) for map_state in state.pop("fit_maps_raw") ]
+        fit_maps_raw = state.pop("fit_maps_raw")
+        hyperplane.fit_maps_raw = None if fit_maps_raw is None else [ Map(**map_state) for map_state in fit_maps_raw ]
         fit_maps_norm = state.pop("fit_maps_norm")
         hyperplane.fit_maps_norm = None if fit_maps_norm is None else [ Map(**map_state) for map_state in fit_maps_norm ]
 
@@ -1233,11 +1234,9 @@ if __name__ == "__main__" :
     # Create hyperplane
     #
 
-    # Define the various systematic parameter sin the hyperplane
+    # Define systematic parameters in the hyperplane
     params = [
         HyperplaneParam( name="foo", func_name="linear", initial_fit_coeffts=[1.], ),
-        # HyperplaneParam( name="foo", func_name="exponential", initial_fit_coeffts=[1.,-1.], ),
-        # HyperplaneParam( name="bar", func_name="linear", initial_fit_coeffts=[1.], ),
         HyperplaneParam( name="bar", func_name="exponential", initial_fit_coeffts=[1.,-1.], ),
     ]
 
