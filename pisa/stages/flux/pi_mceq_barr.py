@@ -212,6 +212,12 @@ class pi_mceq_barr(PiStage):
           container['barr_z+'].get(WHERE), container['barr_z-'].get(WHERE), barr_z,
           out=container['sys_flux'].get(WHERE),
         )
+        print(container['sys_flux'].get(WHERE).shape)
+        print(container['sys_flux'].get(WHERE)[:,0])
+	#print(container['sys_flux'].get(WHERE))
+        neg_mask = container['sys_flux'].get(WHERE)[:,0] < 0.
+	print(neg_mask)
+        container['sys_flux'].get(WHERE)[neg_mask] = 0.
         container['sys_flux'].mark_changed(WHERE)
 
 @myjit
