@@ -227,7 +227,7 @@ def do_setup():
             'line_profiler',
             'matplotlib>=2.0,<3.0', # 1.5: inferno colormap; 2.0: 'C0' colorspec
             'pint>=0.8', # earlier versions buggy
-            'kde',
+            #'kde',
             'simplejson>=3.2',
             'tables',
             'uncertainties',
