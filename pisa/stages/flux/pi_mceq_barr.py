@@ -69,7 +69,7 @@ class pi_mceq_barr(PiStage):
             "i",
             # kaons
             "w",
-            # "x", #TODO x seems to be missing from the splines?????? re-generate
+            "x", 
             "y",
             "z",
         ]
@@ -355,8 +355,8 @@ class pi_mceq_barr(PiStage):
         gradient_params_mapping["i-"] = barr_i
         gradient_params_mapping["w+"] = barr_w
         gradient_params_mapping["w-"] = barr_w
-        # gradient_params_mapping["x+"] = barr_x #TODO
-        # gradient_params_mapping["x-"] = barr_x
+        gradient_params_mapping["x+"] = barr_x
+        gradient_params_mapping["x-"] = barr_x
         gradient_params_mapping["y+"] = barr_y
         gradient_params_mapping["y-"] = barr_y
         gradient_params_mapping["z+"] = barr_z
