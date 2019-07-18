@@ -421,10 +421,13 @@ class pi_mceq_barr(PiStage):
                 out=container['nu_flux'].get(WHERE),
             )
 
-            container['nu_flux'].mark_changed(WHERE)
-
             # Check for negative results from spline
-            #TODO
+            negative_mask = container['nu_flux'].get(WHERE) < 0
+            if np.sum(negative_mask) :
+                container['nu_flux'].get(WHERE)[negative_mask] = 0.
+
+            # Mark as changed
+            container['nu_flux'].mark_changed(WHERE)
 
 
 @myjit
