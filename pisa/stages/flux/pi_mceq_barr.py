@@ -14,7 +14,7 @@ import cPickle as pickle
 from bz2 import BZ2File
 from scipy.interpolate import RectBivariateSpline
 
-from pisa import FTYPE, TARGET
+from pisa import FTYPE, TARGET, ureg
 from pisa.core.pi_stage import PiStage
 from pisa.utils.log import logging
 from pisa.utils.profiler import profile
@@ -94,19 +94,36 @@ class pi_mceq_barr(PiStage):
 
         # Define stage parameters
         expected_params = (
-            'barr_a',
-            'barr_b',
-            'barr_c',
-            'barr_d',
-            'barr_e',
-            'barr_f',
-            'barr_g',
-            'barr_h',
-            'barr_i',
-            'barr_w',
-            'barr_x',
-            'barr_y',
-            'barr_z',
+            # pion
+            'pion_ratio',
+            'barr_a_Pi',
+            'barr_b_Pi',
+            'barr_c_Pi',
+            'barr_d_Pi',
+            'barr_e_Pi',
+            'barr_f_Pi',
+            'barr_g_Pi',
+            'barr_h_Pi',
+            'barr_i_Pi',
+            'barr_a_antiPi',
+            'barr_b_antiPi',
+            'barr_c_antiPi',
+            'barr_d_antiPi',
+            'barr_e_antiPi',
+            'barr_f_antiPi',
+            'barr_g_antiPi',
+            'barr_h_antiPi',
+            'barr_i_antiPi',
+            #kaon
+            'barr_w_K',
+            'barr_x_K',
+            'barr_y_K',
+            'barr_z_K',
+            'barr_w_antiK',
+            'barr_x_antiK',
+            'barr_y_antiK',
+            'barr_z_antiK',
+            # CR
             'delta_index',
             'energy_pivot',
         )
@@ -177,6 +194,9 @@ class pi_mceq_barr(PiStage):
             container['nu_flux_nominal'] = np.full( flux_container_shape, np.NaN, dtype=FTYPE ) 
             container['nu_flux'] = np.full( flux_container_shape, np.NaN, dtype=FTYPE )
             container['gradients'] = np.full( gradients_shape, np.NaN, dtype=FTYPE )
+
+            #print(container["true_coszen"].get("host"))
+            #print(container.keys())
         
         # Also create an array container to hold the gradient parameter values 
         # Only want this once, e.g. not once per container
@@ -303,6 +323,9 @@ class pi_mceq_barr(PiStage):
         #TODO Can I directly write to the original array, will be faster
         np.copyto( src=result, dst=out )
 
+    def antipion_production(self, barr_var, pion_ratio):
+
+        return ((1 + barr_var)/(1 + pion_ratio)) - 1
 
     @profile
     def compute_function(self):
@@ -318,49 +341,58 @@ class pi_mceq_barr(PiStage):
         energy_pivot = self.params.energy_pivot.value.m_as("GeV")
 
         # User variants of Barr parameterisation
-        barr_a = self.params.barr_a.value.m_as('dimensionless')
-        barr_b = self.params.barr_b.value.m_as('dimensionless')
-        barr_c = self.params.barr_c.value.m_as('dimensionless')
-        barr_d = self.params.barr_d.value.m_as('dimensionless')
-        barr_e = self.params.barr_e.value.m_as('dimensionless')
-        barr_f = self.params.barr_f.value.m_as('dimensionless')
-        barr_g = self.params.barr_g.value.m_as('dimensionless')
-        barr_h = self.params.barr_h.value.m_as('dimensionless')
-        barr_i = self.params.barr_i.value.m_as('dimensionless')
-        barr_w = self.params.barr_w.value.m_as('dimensionless')
-        barr_x = self.params.barr_x.value.m_as('dimensionless')
-        barr_y = self.params.barr_y.value.m_as('dimensionless')
-        barr_z = self.params.barr_z.value.m_as('dimensionless')
+        pion_ratio = self.params.pion_ratio.value.m_as('dimensionless')
+
+        # pions
+        barr_a_Pi = self.params.barr_a_Pi.value.m_as('dimensionless')
+        barr_b_Pi = self.params.barr_b_Pi.value.m_as('dimensionless')
+        barr_c_Pi = self.params.barr_c_Pi.value.m_as('dimensionless')
+        barr_d_Pi = self.params.barr_d_Pi.value.m_as('dimensionless')
+        barr_e_Pi = self.params.barr_e_Pi.value.m_as('dimensionless')
+        barr_f_Pi = self.params.barr_f_Pi.value.m_as('dimensionless')
+        barr_g_Pi = self.params.barr_g_Pi.value.m_as('dimensionless')
+        barr_h_Pi = self.params.barr_h_Pi.value.m_as('dimensionless')
+        barr_i_Pi = self.params.barr_i_Pi.value.m_as('dimensionless')
+        #kaons
+        barr_w_K = self.params.barr_w_K.value.m_as('dimensionless')
+        barr_x_K = self.params.barr_x_K.value.m_as('dimensionless')
+        barr_y_K = self.params.barr_y_K.value.m_as('dimensionless')
+        barr_z_K = self.params.barr_z_K.value.m_as('dimensionless')
+        barr_w_antiK = self.params.barr_w_antiK.value.m_as('dimensionless')
+        barr_x_antiK = self.params.barr_x_antiK.value.m_as('dimensionless')
+        barr_y_antiK = self.params.barr_y_antiK.value.m_as('dimensionless')
+        barr_z_antiK = self.params.barr_z_antiK.value.m_as('dimensionless')
 
         # Map the user parameters into the Barr +/- params
         #TODO implement pi+/pi- ratio and K params
         gradient_params_mapping = collections.OrderedDict()
-        gradient_params_mapping["a+"] = barr_a
-        gradient_params_mapping["a-"] = barr_a
-        gradient_params_mapping["b+"] = barr_b
-        gradient_params_mapping["b-"] = barr_b
-        gradient_params_mapping["c+"] = barr_c
-        gradient_params_mapping["c-"] = barr_c
-        gradient_params_mapping["d+"] = barr_d
-        gradient_params_mapping["d-"] = barr_d
-        gradient_params_mapping["e+"] = barr_e
-        gradient_params_mapping["e-"] = barr_e
-        gradient_params_mapping["f+"] = barr_f
-        gradient_params_mapping["f-"] = barr_f
-        gradient_params_mapping["g+"] = barr_g
-        gradient_params_mapping["g-"] = barr_g
-        gradient_params_mapping["h+"] = barr_h
-        gradient_params_mapping["h-"] = barr_h
-        gradient_params_mapping["i+"] = barr_i
-        gradient_params_mapping["i-"] = barr_i
-        gradient_params_mapping["w+"] = barr_w
-        gradient_params_mapping["w-"] = barr_w
-        gradient_params_mapping["x+"] = barr_x
-        gradient_params_mapping["x-"] = barr_x
-        gradient_params_mapping["y+"] = barr_y
-        gradient_params_mapping["y-"] = barr_y
-        gradient_params_mapping["z+"] = barr_z
-        gradient_params_mapping["z-"] = barr_z
+        gradient_params_mapping["a+"] = barr_a_Pi
+        gradient_params_mapping["a-"] = self.antipion_production(barr_a_Pi, pion_ratio)
+        gradient_params_mapping["b+"] = barr_b_Pi
+        gradient_params_mapping["b-"] = self.antipion_production(barr_b_Pi, pion_ratio)
+        gradient_params_mapping["c+"] = barr_c_Pi
+        gradient_params_mapping["c-"] = self.antipion_production(barr_c_Pi, pion_ratio)
+        gradient_params_mapping["d+"] = barr_d_Pi
+        gradient_params_mapping["d-"] = self.antipion_production(barr_d_Pi, pion_ratio)
+        gradient_params_mapping["e+"] = barr_e_Pi
+        gradient_params_mapping["e-"] = self.antipion_production(barr_e_Pi, pion_ratio)
+        gradient_params_mapping["f+"] = barr_f_Pi
+        gradient_params_mapping["f-"] = self.antipion_production(barr_f_Pi, pion_ratio)
+        gradient_params_mapping["g+"] = barr_g_Pi
+        gradient_params_mapping["g-"] = self.antipion_production(barr_g_Pi, pion_ratio)
+        gradient_params_mapping["h+"] = barr_h_Pi
+        gradient_params_mapping["h-"] = self.antipion_production(barr_h_Pi, pion_ratio)
+        gradient_params_mapping["i+"] = barr_i_Pi
+        gradient_params_mapping["i-"] = self.antipion_production(barr_i_Pi, pion_ratio)
+        #kaons
+        gradient_params_mapping["w+"] = barr_w_K
+        gradient_params_mapping["w-"] = barr_w_antiK
+        gradient_params_mapping["x+"] = barr_x_K
+        gradient_params_mapping["x-"] = barr_x_antiK
+        gradient_params_mapping["y+"] = barr_y_K
+        gradient_params_mapping["y-"] = barr_y_antiK
+        gradient_params_mapping["z+"] = barr_z_K
+        gradient_params_mapping["z-"] = barr_z_antiK
 
         # Populate array Barr param array
         for gradient_param_name,gradient_param_idx in self.gradient_param_indices.items() :
