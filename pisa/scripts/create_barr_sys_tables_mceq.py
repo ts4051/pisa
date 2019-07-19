@@ -6,13 +6,13 @@
 #
 
 
-import os, sys, gzip, bz2
+import os, sys, gzip, bz2, collections
 import numpy as np
 import cPickle as pickle
 
 from scipy.interpolate import RectBivariateSpline
 
-# sys.path.append('../../../../../MCEq')
+sys.path.append('../../../../../MCEq/MCEq')
 #sys.path.append('calculations')
 
 #import solver related modules
@@ -109,7 +109,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     mceq_run.unset_mod_pprod(dont_fill=True)
     for p in barr_pars:
         mceq_run.set_mod_pprod(primary_particle, pid, barr_unc, (p, delta))        
-#     mceq_run.y.print_mod_pprod()
+
     mceq_run._init_default_matrices(skip_D_matrix=True)
 
     numu_up, anumu_up, nue_up, anue_up = (np.zeros(dim_res), np.zeros(dim_res),
@@ -127,7 +127,6 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for p in barr_pars:
         mceq_run.set_mod_pprod(primary_particle, pid, barr_unc, (p, -delta))
 
-#     mceq_run.y.print_mod_pprod()
     mceq_run._init_default_matrices(skip_D_matrix=True)
 
     numu_down, anumu_down, nue_down, anue_down = (np.zeros(dim_res),
@@ -142,16 +141,26 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
         nue_down[iz] = gs('total_nue', 0)[tr]
         anue_down[iz] = gs('total_antinue', 0)[tr]
 
+    # calculating derivatives
     fd_derivative = lambda up, down: (up - down) / (2. * delta)
 
     dnumu = fd_derivative(numu_up, numu_down)
     danumu = fd_derivative(anumu_up, anumu_down)
     dnue = fd_derivative(nue_up, nue_down)
     danue = fd_derivative(anue_up, anue_down)
-    return [
-        RectBivariateSpline(cos_theta, np.log(etr), dist) #TODO REMOVE np.log ?
-        for dist in [numu, dnumu, anumu, danumu, nue, dnue, anue, danue] #TODO dict instead?
-    ]
+
+    result = collections.OrderedDict()
+    result_type = ["numu", "dnumu", "numubar", "dnumubar", "nue", "dnue", "nuebar", "dnuebar"]
+
+    for dist, sp in zip([numu, dnumu, anumu, danumu, nue, dnue, anue, danue], result_type): 
+        result[sp] = RectBivariateSpline(cos_theta, np.log(etr), dist)
+
+    return result
+
+    #return [
+    #    RectBivariateSpline(cos_theta, np.log(etr), dist) #TODO REMOVE np.log ?
+    #    for dist in [numu, dnumu, anumu, danumu, nue, dnue, anue, danue] #TODO dict instead?
+    #]
 
 if __name__ == '__main__':
 
@@ -160,7 +169,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument( "-i", "--interaction-model", type=str, required=False, default="sibyll23c", help="Hadronic interaction model" )
     parser.add_argument( "-c", "--cosmic-ray-model", type=str, required=False, default="GlobalSplineFitBeta", help="Primary cosmic ray spectrum model" )
-    parser.add_argument( "-o", "--output-dir", type=str, required=False, default=None, help="Output directory" )
+    parser.add_argument( "-o", "--output-dir", type=str, required=False, default="", help="Output directory" )
     args = parser.parse_args()
 
     # Get interaction model
@@ -171,6 +180,11 @@ if __name__ == '__main__':
     CRModel = getattr(pm,args.cosmic_ray_model) # Gettting class (NOT instantiating)
     assert issubclass(CRModel,pm.PrimaryFlux), "Unknown primary cosmic ray spectrum model"
 
+    # define CR model parameters
+    if args.cosmic_ray_model=="HillasGaisser2012": CR_vers = "H3a"
+    elif args.cosmic_ray_model=="GaisserStanevTilav": CR_vers = "4-gen"
+    else: CR_vers=None
+
     idjob = 0  # int(os.path.expandvars('$SGE_TASK_ID')) - 1
 
     mceq_run = MCEqRun(
@@ -178,7 +192,7 @@ if __name__ == '__main__':
         interaction_model=interaction_model,
         #primary cosmic ray flux model
         #support a tuple (primary model class (not instance!), arguments)
-        primary_model=(CRModel, None),
+        primary_model=(CRModel, CR_vers),
         # Zenith angle in degrees. 0=vertical, 90=horizontal
         theta_deg=0.,
         #GPU device id
@@ -209,22 +223,19 @@ if __name__ == '__main__':
     # (Can be increased to 20 after debugging is done)
     # The flux without propagation effects and atmospheric variations
     # is up/down symmetric.
-    cos_theta = np.linspace(0, 1, 21)
+    cos_theta = np.linspace(0, 1, 10)
     angles = np.arccos(cos_theta) / np.pi * 180.
 
     # Report settings
     print "Running with :"
     print "  Interaction model : %s" % interaction_model
-    print "  Prmary cosmic ray spectrum model : %s" % args.cosmic_ray_model
+    print "  Primary cosmic ray spectrum model : %s" % args.cosmic_ray_model
 
     # Some technical shortcuts
     solution = {}
-    # gs = mceq_run.get_solution
-    # pidx = mceq_run.pdg2pref[2212].lidx()
-    # nidx = mceq_run.pdg2pref[2112].lidx()
-    # mag = 0.
     tr = np.where(mceq_run.e_grid < E_tr)
     etr = mceq_run.e_grid[tr]
+
 
     # Barr variables related to pions
     barr_pivars = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
@@ -245,6 +256,8 @@ if __name__ == '__main__':
         "primary_particle" : primary_particle,
         "cosmic_ray_model" : args.cosmic_ray_model,
         "interaction_model" : interaction_model,
+        "barr_variables": barr_pivars+barr_kvars,
+        "atmospheric_model": atm_model
         #TODO atmosphere
     }
 
