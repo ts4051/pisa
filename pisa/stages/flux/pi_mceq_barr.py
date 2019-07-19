@@ -75,8 +75,8 @@ class pi_mceq_barr(PiStage):
         ]
 
         # Define signs for Barr params
-        # +  -> meson
-        # -  -> antimeson
+        # +  -> meson production
+        # -  -> antimeson production
         self.barr_param_signs = ["+","-"]
 
         # Atmopshere model params
@@ -184,7 +184,7 @@ class pi_mceq_barr(PiStage):
         for container in self.data:
 
             # Define shapes for containers
-            #TODO maybe include toggles for nutau (only needed if prompt considered) and for nu+nubar (only needed if nu->nubar oscillations included) for better speed/memory performance
+            # TODO maybe include toggles for nutau (only needed if prompt considered) and for nu+nubar (only needed if nu->nubar oscillations included) for better speed/memory performance
             flux_container_shape = ( container.size, 3 ) # [ N events, 3 flavors in flux, nu vs nubar ]
             gradients_shape = tuple( list(flux_container_shape) + list(gradient_params_shape) )
 
@@ -194,9 +194,6 @@ class pi_mceq_barr(PiStage):
             container['nu_flux_nominal'] = np.full( flux_container_shape, np.NaN, dtype=FTYPE ) 
             container['nu_flux'] = np.full( flux_container_shape, np.NaN, dtype=FTYPE )
             container['gradients'] = np.full( gradients_shape, np.NaN, dtype=FTYPE )
-
-            #print(container["true_coszen"].get("host"))
-            #print(container.keys())
         
         # Also create an array container to hold the gradient parameter values 
         # Only want this once, e.g. not once per container
@@ -252,7 +249,7 @@ class pi_mceq_barr(PiStage):
             self._eval_spline( 
                 true_log_energy=true_log_energy, 
                 true_abs_coszen=true_abs_coszen, 
-                spline=self.spline_tables_dict[arb_gradient_param_key][4 if nubar > 0 else 6],
+                spline=self.spline_tables_dict[arb_gradient_param_key]["nue" if nubar > 0 else "nuebar"],
                 out=nu_flux_nominal[:,0],
             )
 
@@ -260,7 +257,7 @@ class pi_mceq_barr(PiStage):
             self._eval_spline( 
                 true_log_energy=true_log_energy, 
                 true_abs_coszen=true_abs_coszen, 
-                spline=self.spline_tables_dict[arb_gradient_param_key][0 if nubar > 0 else 2],
+                spline=self.spline_tables_dict[arb_gradient_param_key]["numu" if nubar > 0 else "numubar"],
                 out=nu_flux_nominal[:,1],
             )
 
@@ -287,7 +284,7 @@ class pi_mceq_barr(PiStage):
                 self._eval_spline( 
                     true_log_energy=true_log_energy, 
                     true_abs_coszen=true_abs_coszen, 
-                    spline=self.spline_tables_dict[gradient_param_name][5 if nubar > 0 else 7],
+                    spline=self.spline_tables_dict[gradient_param_name]["dnue" if nubar > 0 else "dnuebar"],
                     out=gradients[:,0,gradient_param_idx],
                 )
 
@@ -295,7 +292,7 @@ class pi_mceq_barr(PiStage):
                 self._eval_spline( 
                     true_log_energy=true_log_energy, 
                     true_abs_coszen=true_abs_coszen, 
-                    spline=self.spline_tables_dict[gradient_param_name][1 if nubar > 0 else 3],
+                    spline=self.spline_tables_dict[gradient_param_name]["dnumu" if nubar > 0 else "dnumubar"],
                     out=gradients[:,1,gradient_param_idx],
                 )
 
@@ -364,7 +361,7 @@ class pi_mceq_barr(PiStage):
         barr_z_antiK = self.params.barr_z_antiK.value.m_as('dimensionless')
 
         # Map the user parameters into the Barr +/- params
-        #TODO implement pi+/pi- ratio and K params
+        # pi- production rates is restricted by the pi-ratio, just as in arXiv:0611266
         gradient_params_mapping = collections.OrderedDict()
         gradient_params_mapping["a+"] = barr_a_Pi
         gradient_params_mapping["a-"] = self.antipion_production(barr_a_Pi, pion_ratio)
@@ -385,6 +382,7 @@ class pi_mceq_barr(PiStage):
         gradient_params_mapping["i+"] = barr_i_Pi
         gradient_params_mapping["i-"] = self.antipion_production(barr_i_Pi, pion_ratio)
         #kaons
+        # as the kaon ratio is unknown, K- production is not restricted
         gradient_params_mapping["w+"] = barr_w_K
         gradient_params_mapping["w-"] = barr_w_antiK
         gradient_params_mapping["x+"] = barr_x_K
