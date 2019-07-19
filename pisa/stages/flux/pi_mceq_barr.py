@@ -211,8 +211,10 @@ class pi_mceq_barr(PiStage):
         Have splines for each Barr parameter, plus +/- versions of each 
         Barr parameter corresponding to mesons/antimesons.
 
-        For a give Barr parameter, order of splines is:
-            [numu, dnumu, anumu, danumu, nue, dnue, anue, danue] #TODO dict instead?
+        For a give Barr parameter, an underlying dictionary have the following keywords: 
+            "numu", "numubar", "nue", "nuebar"
+            derivatives: "dnumu", "dnumubar", "dnue", dnuebar"
+        Units are changed to m^-2 in creates_splines.., rather than cm^2 which is the unit of calculation in MCEq
 
         Note that doing this all on CPUs, since the splines reside on the CPUs
         The actual `compute_function` computation can be done on GPUs though
@@ -311,10 +313,6 @@ class pi_mceq_barr(PiStage):
 
         # Evalate the spine
         result = spline( true_abs_coszen, true_log_energy, grid=False )
-
-        # Correct units
-        #TODO Make MCEq spline creation script write in the desired units (assuming splining still behaves nicely...)
-        result = result * 1.e4 #TODO document units
 
         # Copy to output array
         #TODO Can I directly write to the original array, will be faster
