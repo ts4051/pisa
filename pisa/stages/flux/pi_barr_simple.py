@@ -101,6 +101,12 @@ class pi_barr_simple(PiStage):  # pylint: disable=invalid-name
         assert self.output_mode is not None
 
 
+    def setup_function(self):
+        self.data.data_specs = self.calc_specs
+        for container in self.data:
+            container["nu_flux"] = np.empty((container.size, 2), dtype=FTYPE)
+
+
     @profile
     def compute_function(self):
         self.data.data_specs = self.calc_specs
