@@ -92,6 +92,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     print 'Parameters corresponding to selection', barr_pars
     dim_res = len(zenith_list), etr.shape[0]
     gs = mceq_run.get_solution
+    unit=1e4
 
     # Solving nominal MCEq flux
     numu, anumu, nue, anue = (np.zeros(dim_res), np.zeros(dim_res),
@@ -100,10 +101,10 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for iz, zen_deg in enumerate(zenith_list):
         mceq_run.set_theta_deg(zen_deg)
         mceq_run.solve()
-        numu[iz] = gs('total_numu', 0)[tr]
-        anumu[iz] = gs('total_antinumu', 0)[tr]
-        nue[iz] = gs('total_nue', 0)[tr]
-        anue[iz] = gs('total_antinue', 0)[tr]
+        numu[iz] = gs('total_numu', 0)[tr]*unit
+        anumu[iz] = gs('total_antinumu', 0)[tr]*unit
+        nue[iz] = gs('total_nue', 0)[tr]*unit
+        anue[iz] = gs('total_antinue', 0)[tr]*unit
 
     # Solving for plus one sigma 
     mceq_run.unset_mod_pprod(dont_fill=True)
@@ -117,10 +118,10 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for iz, zen_deg in enumerate(zenith_list):
         mceq_run.set_theta_deg(zen_deg)
         mceq_run.solve()
-        numu_up[iz] = gs('total_numu', 0)[tr]
-        anumu_up[iz] = gs('total_antinumu', 0)[tr]
-        nue_up[iz] = gs('total_nue', 0)[tr]
-        anue_up[iz] = gs('total_antinue', 0)[tr]
+        numu_up[iz] = gs('total_numu', 0)[tr]*unit
+        anumu_up[iz] = gs('total_antinumu', 0)[tr]*unit
+        nue_up[iz] = gs('total_nue', 0)[tr]*unit
+        anue_up[iz] = gs('total_antinue', 0)[tr]*unit
 
     # Solving for minus one sigma
     mceq_run.unset_mod_pprod(dont_fill=True)
@@ -136,10 +137,10 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for iz, zen_deg in enumerate(zenith_list):
         mceq_run.set_theta_deg(zen_deg)
         mceq_run.solve()
-        numu_down[iz] = gs('total_numu', 0)[tr]
-        anumu_down[iz] = gs('total_antinumu', 0)[tr]
-        nue_down[iz] = gs('total_nue', 0)[tr]
-        anue_down[iz] = gs('total_antinue', 0)[tr]
+        numu_down[iz] = gs('total_numu', 0)[tr]*unit
+        anumu_down[iz] = gs('total_antinumu', 0)[tr]*unit
+        nue_down[iz] = gs('total_nue', 0)[tr]*unit
+        anue_down[iz] = gs('total_antinue', 0)[tr]*unit
 
     # calculating derivatives
     fd_derivative = lambda up, down: (up - down) / (2. * delta)
@@ -223,7 +224,7 @@ if __name__ == '__main__':
     # (Can be increased to 20 after debugging is done)
     # The flux without propagation effects and atmospheric variations
     # is up/down symmetric.
-    cos_theta = np.linspace(0, 1, 10)
+    cos_theta = np.linspace(0, 1, 21)
     angles = np.arccos(cos_theta) / np.pi * 180.
 
     # Report settings
