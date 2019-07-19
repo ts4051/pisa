@@ -95,7 +95,7 @@ class pi_honda_ip(PiStage):
         for container in self.data:
             container['nu_flux_nominal'] = np.empty((container.size, 2), dtype=FTYPE)
             container['nubar_flux_nominal'] = np.empty((container.size, 2), dtype=FTYPE)
-            container['nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
+            # container['nu_flux'] = np.empty((container.size, 2), dtype=FTYPE)
 
         # don't forget to un-link everything again
         self.data.unlink_containers()
@@ -132,11 +132,13 @@ class pi_honda_ip(PiStage):
         self.data.unlink_containers()
 
 
-    def apply_function(self):
+    # def apply_function(self):
 
-        # Set flux to be the nominal flux (choosing correct nu vs nubar flux for the container)
-        # Note that a subsequent systematic flux stage may change this
-        for container in self.data:
-            np.copyto( src=container["nu%s_flux_nominal"%("" if container["nubar"] > 0 else "bar")].get("host"), dst=container["nu_flux"].get("host") )
-        container['nu_flux'].mark_changed('host')
+    #     self.data.data_specs = self.output_specs
+
+    #     # Set flux to be the nominal flux (choosing correct nu vs nubar flux for the container)
+    #     # Note that a subsequent systematic flux stage may change this
+    #     for container in self.data:
+    #         np.copyto( src=container["nu%s_flux_nominal"%("" if container["nubar"] > 0 else "bar")].get("host"), dst=container["nu_flux"].get("host") )
+    #         container['nu_flux'].mark_changed('host')
 
