@@ -158,11 +158,6 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
 
     return result
 
-    #return [
-    #    RectBivariateSpline(cos_theta, np.log(etr), dist) #TODO REMOVE np.log ?
-    #    for dist in [numu, dnumu, anumu, danumu, nue, dnue, anue, danue] #TODO dict instead?
-    #]
-
 if __name__ == '__main__':
 
     # Get command line args
