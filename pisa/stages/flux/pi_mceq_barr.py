@@ -1,9 +1,12 @@
 
 """
-Stage to implement the intrimsic neutrino flux as calculated with MCEq, 
+Stage to implement the inclusive neutrino flux as calculated with MCEq, 
 and the systematic flux variations based on the Barr scheme. 
 
-It requires spline tables created by the `$PISA/scripts/create_barr_sys_tables_mceq.py`
+It requires spline tables created by the `pisa/scripts/create_barr_sys_tables_mceq.py`
+Pre-generated tables can be found at `fridge/analysis/common/data/flux/
+
+Tom Stuttard, Ida Storehaug, Philipp Eller, Summer Blot
 """
 from __future__ import absolute_import, print_function, division
 
@@ -24,18 +27,44 @@ from pisa.utils.resources import find_resource
 
 class pi_mceq_barr(PiStage):
     """
-    stage generate nominal flux from MCEq and apply Barr style flux uncertainties.
+    Stage to generate nominal flux from MCEq and apply Barr style flux uncertainties.
 
     Paramaters
     ----------
-    barr_* : quantity (dimensionless)
+    table_file : directory of pre-generated tables from MCEq
+
+    params : ParamSet
+    	Must exclusively have parameters: 
+
+    	delta_index : quantity (dimensionless)
+			Shift in the spectral index of the neutrino flux. Prior with a mean of 0. 
+
+    	energy_pivot : quantity (GeV)
+			The spectral index is shifting around a pivot point 
+
+    	barr_*_Pi : quantity (dimensionless)
+    		* from a to i
+    		Uncertainty on pi+ production in a region of phase space *, further defined in Barr 2006
+
+    	pion_ratio : quantity (dimensionless)
+    		The uncertainty on pi- production is assumed to be correlated to the pi+ production uncertainty, 
+    		as the pi+/pi- ratio is measured. Thus the uncertainty on pi- production is defined by pion_ratio and barr_*_pi
+
+    	barr_*_K : quantity (dimensionless)
+    		* from w to z
+			Uncertainty on K+ production in a region of phase space *, further defined in Barr 2006
+
+    	barr_*_antiK : quantity (dimensionless) 
+    		* from w to z
+    		Uncertainty on K- and K+ production is assumed to be uncorrelated as the ratio is badly determined. 
 
     Notes
     -----
-    The table consists of 2 solutions of the cascade equation per Barr variable (12) 
-    - one solution for meson and one solution for the antimeson. 
-    Each solution consists of 8 splines: idx=0,2,4,6=numu, numubar, nue, nuebar. 
-    idx=1,3,5,7=gradients of numu, numubar, nue, nuebar. 
+	The nominal flux is calculated using MCEq, then multiplied with a shift in spectral index, and then modifications due to meson production (barr variables) are added.
+	The MCEq-table has 2 solutions of the cascade equation per Barr variable (12) 
+    - one solution for meson and one solution for the antimeson production uncertainty. 
+    Each solution consists of 8 splines: "numu", "numubar", "nue", and "nuebar" is the nominal flux. 
+    "dnumu", "dnumubar", "dnue", and "dnuebar" is the gradient of the Barr modification
 
     """
 
@@ -105,15 +134,6 @@ class pi_mceq_barr(PiStage):
             'barr_g_Pi',
             'barr_h_Pi',
             'barr_i_Pi',
-            'barr_a_antiPi',
-            'barr_b_antiPi',
-            'barr_c_antiPi',
-            'barr_d_antiPi',
-            'barr_e_antiPi',
-            'barr_f_antiPi',
-            'barr_g_antiPi',
-            'barr_h_antiPi',
-            'barr_i_antiPi',
             #kaon
             'barr_w_K',
             'barr_x_K',
@@ -222,8 +242,6 @@ class pi_mceq_barr(PiStage):
 
         # Load the MCEq splines
         self.spline_tables_dict = pickle.load( BZ2File( find_resource(self.table_file) ) )
-
-        #TODO Need to also include splines with heavy ions (so far only have protons)
 
         # Loop over containers
         for container in self.data :
@@ -450,7 +468,7 @@ def apply_sys_kernel(
     '''
     Calculation:
       1) Start from nominal flux
-      2) Apply spectral index shift #TODO Do this BEFORE or AFTER Hadronic contribution?
+      2) Apply spectral index shift
       3) Add contributions from MCEq-computed gradients
 
     Array dimensions :
