@@ -183,7 +183,14 @@ def evolve_states(cz_shape, propagators, ini_states, nsq_earth_atm, osc_params):
         # set decoherence parameters
         if hasattr(nuSQ,"Set_DecoherenceGammaMatrix") : #TODO Find a nicer way to do this (maybe make all this into a class?)
             nuSQ.Set_DecoherenceGammaMatrix(osc_params.gamma21,osc_params.gamma31,osc_params.gamma32)
-            nuSQ.Set_DecoherenceGammaEnergyDependence(osc_params.n_energy)
+            nuSQ.Set_DecoherenceGammaEnergyDependence(osc_params.gamma_n)
+            nuSQ.Set_DecoherenceGammaEnergyScale(osc_params.gamma_energy_scale)
+            if osc_params.gamma_basis == "mass" :
+                nuSQ.Set_DecoherenceBasis(nsq.Basis.mass)
+            elif osc_params.gamma_basis == "flavor" :
+                nuSQ.Set_DecoherenceBasis(nsq.Basis.flavor)
+            else :
+                raise Exception("Unknown decoherence basis : %s" % osc_params.gamma_basis)
 
         nuSQ.Set_initial_state(ini_states[input_name], nsq.Basis.flavor)
 
