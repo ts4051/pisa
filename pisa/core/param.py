@@ -117,9 +117,9 @@ class Param(object):
     _slots = ('name', 'unique_id', 'value', 'prior', 'range', 'is_fixed',
               'is_discrete', 'nominal_value', '_rescaled_value',
               '_nominal_value', '_tex', 'help', '_value', '_range', '_units',
-              'normalize_values')
+              'units', 'normalize_values')
     _state_attrs = ('name', 'unique_id', 'value', 'prior', 'range', 'is_fixed',
-                    'is_discrete', 'nominal_value', 'tex', 'help')
+                    'is_discrete', 'nominal_value', 'tex', 'help') #TODO units?
 
     def __init__(self, name, value, prior, range, is_fixed, unique_id=None,
                  is_discrete=False, nominal_value=None, tex=None, help=''):
@@ -128,8 +128,11 @@ class Param(object):
         self._value = None
         self._units = None
 
-        self.value = value
         self.name = name
+
+        self._init_units(value)
+
+        self.value = value
         self.unique_id = unique_id if unique_id is not None else name
         self._tex = tex
         self.help = help
@@ -185,20 +188,35 @@ class Param(object):
 
     @value.setter
     def value(self, val):
+        self._value = self._format_numerical_value(val)
+        self.validate_value(self._value)
+
+    def _format_numerical_value(self, val):
+
+        # Ignore non-numerical values
+        if isinstance( val, (basestring,bool,) ) :
+            return val
+
         # A number with no units actually has units of "dimensionless"
         if isbarenumeric(val):
             val = val * ureg.dimensionless
-        if self._value is not None:
-            if hasattr(self._value, 'units'):
-                assert hasattr(val, 'units'), \
-                        'Passed values must have units if the param has units'
-                val = val.to(self._value.units)
-            self.validate_value(val)
-        self._value = val
-        if hasattr(self._value, 'units'):
-            self._units = self._value.units
-        else:
+
+        # Make sure to use the same units for all values
+        if self._units is not None :
+            assert hasattr(val, 'units'), \
+                    'Passed values must have units if the param has units'
+            val = val.to(self._units)
+        
+        return val
+
+
+    def _init_units(self,val):
+        if isbarenumeric(val):
             self._units = ureg.Unit('dimensionless')
+        elif hasattr(val, 'units'):
+            self._units = val.units
+        else:
+            self._units = None
 
     @property
     def magnitude(self):
@@ -223,6 +241,20 @@ class Param(object):
     def u(self):
         return self._units
 
+    @units.setter
+    def units(self, u):
+        # Store the unit
+        self._units = ureg.Unit(u) if isinstance(u,basestring) else u
+        # Update values of all member data with units
+        self.value = self.value.to(self._units)
+        self.nominal_value = self.nominal_value.to(self._units)
+        if self._range is not None :
+            if self._range[0] is None :
+                self._range[0] = self._range[0].to(self._units)
+            if self._range[1] is None :
+                self._range[1] = self._range[1].to(self._units)
+        assert (self.prior is None) or (self.prior.kind == "uniform"), "TODO implement this...."
+
     @property
     def range(self):
         if self._range is None:
@@ -231,18 +263,22 @@ class Param(object):
 
     @range.setter
     def range(self, values):
+
         if values is None:
             self._range = None
             return
+
         new_vals = []
         for val in values:
-            if isbarenumeric(val):
-                val = val * ureg.dimensionless
+
+            val = self._format_numerical_value(val)
+
             # NOTE: intentionally using type() instead of isinstance() here.
             # Not sure if this could be converted to isinstance(), though.
             if not type(val) == type(self.value): # pylint: disable=unidiomatic-typecheck
                 raise TypeError('Value "%s" has type %s but must be of type'
                                 ' %s.' % (val, type(val), type(self.value)))
+
             if isinstance(self.value, ureg.Quantity):
                 if self.dimensionality != val.dimensionality:
                     raise ValueError('Value "%s" units "%s" incompatible with'
@@ -250,7 +286,9 @@ class Param(object):
                                      % (val, val.units, self.units))
 
             new_vals.append(val)
+
         self._range = new_vals
+
 
     # TODO: make discrete values rescale to integers 0, 1, ...
     @property
@@ -295,6 +333,7 @@ class Param(object):
 
     @nominal_value.setter
     def nominal_value(self, value):
+        value = self._format_numerical_value(value)
         self.validate_value(value)
         self._nominal_value = value
 
