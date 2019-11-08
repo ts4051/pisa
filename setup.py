@@ -13,15 +13,15 @@ Checkout the source code tree in the current directory via
 
 and install basic PISA package (in editable mode via -e flag) via
 
-    $ pip install -e ./pisa -r ./pisa/requirements.txt
+    $ pip install -e ./pisa
 
 or include optional dependencies by specifying them in brackets
 
-    $ pip install -e ./pisa[numba,develop] -r ./pisa/requirements.txt
+    $ pip install -e ./pisa[develop]
 
 If you wish to upgrade PISA and/or its dependencies:
 
-    $ pip install ./pisa[numba,develop] -r ./pisa/requirements.txt --upgrade
+    $ pip install ./pisa[develop] --upgrade
 """
 
 
@@ -214,29 +214,27 @@ def do_setup():
         author_email='jll1062+pisa@phys.psu.edu',
         url='http://github.com/icecubeopensource/pisa',
         cmdclass=cmdclasses,
-        python_requires='>=2.7, <3.0',
+        python_requires='>3.6',
         setup_requires=[
             'pip>=1.8',
             'setuptools>18.5', # versioneer requires >18.5
-            'numpy>=1.11',
+            'numpy>=1.17'
         ],
         install_requires=[
             'configparser',
             'scipy>=0.17',
             'h5py',
             'line_profiler',
-            'matplotlib>=2.0,<3.0', # 1.5: inferno colormap; 2.0: 'C0' colorspec
+            'matplotlib>=3.0', # 1.5: inferno colormap; 2.0: 'C0' colorspec
             'pint>=0.8', # earlier versions buggy
             'kde',
             'simplejson>=3.2',
             'tables',
             'uncertainties',
             'decorator',
+            'numba==0.43.1', # >=0.35: fastmath jit flag; >=0.38: issue #439, <0.44 because SmartArray deprication
         ],
         extras_require={
-            'numba': [
-                'numba>=0.38' # >=0.35: fastmath jit flag; >=0.38: issue #439
-            ],
             'develop': [
                 'pylint>=1.7',
                 'recommonmark',
@@ -254,9 +252,10 @@ def do_setup():
             #    'MCEq'
             #]
         },
-        #dependency_links=[
-        #    'git+https://github.com/afedynitch/MCEq.git#egg=MCEq'
-        #],
+        dependency_links=[
+            'git+https://github.com/icecubeopensource/kde.git#egg=kde',
+            #'git+https://github.com/afedynitch/MCEq.git#egg=MCEq',
+        ],
         packages=find_packages(),
         ext_modules=ext_modules,
         package_data=package_data,

@@ -8,10 +8,8 @@ _Note that terminal commands below are intended for the bash shell. You'll have 
     https://github.com
     * Sign up for Github education pack for many features for free, too<br>
         https://education.github.com/pack
-1. Request access to the PISA repo by emailing (including your github user ID) John Kelley and Justin Lanfranchi<br>
-    [jkelley@icecube.wisc.edu](mailto:jkelley@icecube.wisc.edu), [jll1062+pisa@phys.psu.edu](mailto:jll1062+pisa@phys.psu.edu)
 1. Fork PISA on github so you have your own copy to work from<br>
-    https://github.com/jllanfranchi/pisa#fork-destination-box
+    https://github.com/IceCubeOpenSource/pisa#fork-destination-box
 1. _(optional)_ Set up shared-key ssh access to github so you don’t have to enter passwords<br>
     https://help.github.com/articles/connecting-to-github-with-ssh
 1. In your terminal, define a directory for PISA sourcecode to live in. For example:<br>
@@ -29,14 +27,14 @@ _Note that terminal commands below are intended for the bash shell. You'll have 
         https://www.anaconda.com/download
     * Miniconda (just the essentials, ~40 MB)<br>
         https://conda.io/miniconda.html
-1. Install PISA including optional packages for PISA pi stages (`numba`) and development tools (`develop`), if desired<br>
-    `pip install -e $PISA[numba,develop] -r $PISA/requirements.txt -vvv`
+1. Install PISA including optional packages and development tools (`develop`), if desired<br>
+    `pip install -e $PISA[develop] -vvv`
 1. Run a quick test: generate templates in the staged mode<br>
 `$PISA/pisa/core/pipeline.py --pipeline settings/pipeline/example.cfg  --outdir /tmp/pipeline_output --intermediate --pdf -v`
 
-See [github.com/jllanfranchi/pisa/wiki/installation_specific_examples](https://github.com/jllanfranchi/pisa/wiki/installation_specific_examples) for users' recipes for installing PISA under various circumstances.
+See [github.com/IceCubeOpenSource/pisa/wiki/installation_specific_examples](https://github.com/IceCubeOpenSource/pisa/wiki/installation_specific_examples) for users' recipes for installing PISA under various circumstances.
 Please add notes there and/or add your own recipe if your encounter a unique installation issue.
-Also, for instructions on running PISA on Open Science Grid (OSG) nodes, see [github.com/jllanfranchi/pisa/wiki/Running-PISA-on-GRID-nodes-with-access-to-CVMFS](https://github.com/jllanfranchi/pisa/wiki/Running-PISA-on-GRID-nodes-with-access-to-CVMFS)
+Also, for instructions on running PISA on Open Science Grid (OSG) nodes, see [github.com/IceCubeOpenSource/pisa/wiki/Running-PISA-on-GRID-nodes-with-access-to-CVMFS](https://github.com/jllanfranchi/pisa/wiki/Running-PISA-on-GRID-nodes-with-access-to-CVMFS)
 
 The following sections delve into deeper detail on installing PISA.
 
@@ -72,67 +70,70 @@ Also note that Python, HDF5, and pip support come pre-packaged or as `conda`-ins
 * [hdf5](http://www.hdfgroup.org/HDF5) — install with `--enable-cxx` option
   * In Ubuntu,<br>
     `sudo apt install libhdf5-10`
+* [llvm](http://llvm.org) Compiler needed by Numba. This is automatically installed in Anaconda alongside `numba`, but must be installed manually on your system otherwise.
+  * Anaconda<br>
+    `conda install numba=0.38`
+  * In Ubuntu,<br>
+    `sudo apt install llvm-3.9-dev`
 
 Required Python modules that are installed automatically when you use the `pip` command detailed later:
 * [configparser](https://pypi.python.org/pypi/configparser)
 * [decorator](https://pypi.python.org/pypi/decorator)
 * [h5py](http://www.h5py.org)
 * [line_profiler](https://pypi.python.org/pypi/line_profiler): detailed profiling output<br>
+  * if automatic pip installation of line_profiler fails, you may want to try `conda install line_profiler` if you are using anaconda
 * [matplotlib](http://matplotlib.org) >= 2.0 required
 * [numpy](http://www.numpy.org) version >= 1.11.0 required
 * [pint](https://pint.readthedocs.org) >= 0.8 required
+  * if automatic pip installation of pint fails, you may want to try `conda install pint` if you are using anaconda
 * [scipy](http://www.scipy.org) version >= 0.17 required
 * [setuptools](https://setuptools.readthedocs.io) version >= 0.18 required
 * [simplejson](https://github.com/simplejson/simplejson) version >= 3.2.0 required
 * [tables](http://www.pytables.org)
 * [uncertainties](https://pythonhosted.org/uncertainties)
-* [kde](svn co http://code.icecube.wisc.edu/svn/sandbox/schoenen/kde/releases/V00-01-01 kde)
+* [numba>=0.38](http://numba.pydata.org) Just-in-time compilation of decorated Python functions to native machine code via LLVM. This package is required to use PISA pi; also in cake it can accelerate certain routines significantly. If not using Anaconda to install, you must have LLVM installed already on your system (see above).
+* [kde](https://github.com/IceCubeOpenSource/kde)
   * You can install the `kde` module manually if it fails to install automatically:
     * Including CUDA support:<br>
-      `pip install svn+http://code.icecube.wisc.edu/svn/sandbox/schoenen/kde/releases/V00-01-01#egg=kde[cuda]`
+      `pip install git+https://github.com/icecubeopensource/kde.git#egg=kde[cuda]`
     * Without CUDA support:<br>
-      `pip install svn+http://code.icecube.wisc.edu/svn/sandbox/schoenen/kde/releases/V00-01-01#egg=kde`
+      `pip install git+https://github.com/icecubeopensource/kde.git#egg=kde`
 
 
 ### Optional Dependencies
 
 Optional dependencies. Some of these must be installed manually prior to installing PISA, and some will be installed automatically by pip, and this seems to vary from system to system. Therefore you can first try to run the installation, and just install whatever pip says it needed, or just use apt, pip, and/or conda to install the below before running the PISA installation.
 
-* [llvm](http://llvm.org) Compiler needed by Numba. This is automatically installed in Anaconda alongside `numba`, but must be installed manually on your system otherwise.
-  * Anaconda<br>
-    `conda install numba=0.38`
-  * In Ubuntu,<br>
-    `sudo apt install llvm-3.9-dev`
 * [MCEq](http://github.com/afedynitch/MCEq) Required for `flux.mceq` service.
-* [numba=0.38](http://numba.pydata.org) Just-in-time compilation of decorated Python functions to native machine code via LLVM. This package is required to use PISA pi; also in cake it can accelerate certain routines significantly. If not using Anaconda to install, you must have LLVM installed already on your system (see above).
 * [nuSQuiDS](https://github.com/arguelles/nuSQuIDS) Required for `osc.nusquids` service.
-  * Installed alongside PISA if you specify option `['numba']` to `pip`
+* [pandas](https://pandas.pydata.org/) Required for datarelease (csv) stages.
 * [OpenMP](http://www.openmp.org) Intra-process parallelization to accelerate code on on multi-core/multi-CPU computers.
   * Available from your compiler: gcc supports OpenMP 4.0 and Clang >= 3.8.0 supports OpenMP 3.1. Either version of OpenMP should work, but Clang has yet to be tested for its OpenMP support.
 * [Pylint](http://www.pylint.org): Static code checker and style analyzer for Python code. Note that our (more or less enforced) coding conventions are codified in the pylintrc file in PISA, which will automatically be found and used by Pylint when running on code within a PISA package.<br>
   * Installed alongside PISA if you specify option `['develop']` to `pip`
 * [recommonmark](http://recommonmark.readthedocs.io/en/latest/) Translator to allow markdown docs/docstrings to be used; plugin for Sphinx. (Required to compile PISA's documentation.)
   * Installed alongside PISA if you specify option `['develop']` to `pip`
-* [ROOT >= 6.12.04 with PyROOT](https://root.cern.ch) Necessary for `xsec.genie` and `unfold.roounfold` services, and to read ROOT cross section files in the `crossSections` utils module. Due to a bug in ROOT's python support (documented here https://github.com/jllanfranchi/pisa/issues/430), you need at least version 6.12.04 of ROOT.
+* [ROOT >= 6.12.04 with PyROOT](https://root.cern.ch) Necessary for `xsec.genie`, `unfold.roounfold` and `absorption.pi_earth_absorption` services, and to read ROOT cross section files in the `crossSections` utils module. Due to a bug in ROOT's python support (documented here https://github.com/IceCubeOpenSource/pisa/issues/430), you need at least version 6.12.04 of ROOT.
 * [Sphinx](http://www.sphinx-doc.org/en/stable/) version >= 1.3
   * Installed alongside PISA if you specify option `['develop']` to `pip`
 * [versioneer](https://github.com/warner/python-versioneer) Automatically get versions from git and make these embeddable and usable in code. Note that the install process is unique since it first places `versioneer.py` in the PISA root directory, and then updates source files within the repository to provide static and dynamic version info.
   * Installed alongside PISA if you specify option `['develop']` to `pip`
-* [yapf](https://github.com/google/yapf) Format your Python code, _automatically_, with typically very nice results!
+* [black](https://github.com/ambv/black) Format your Python code, _automatically_, with typically very nice results!
+  * Note this only works in Python3
 
 
 ### Obtain PISA sourcecode
 
 #### Develop PISA: Fork then clone
 
-If you wish to modify PISA and contribute your code changes back to the PISA project (*highly recommended!*), fork `jllanfranchi/pisa` from Github.
+If you wish to modify PISA and contribute your code changes back to the PISA project (*highly recommended!*), fork `IceCubeOpenSource/pisa` from Github.
 *(How to work with the `cake` branch of PISA will be detailed below.)*
 
 Forking creates your own version of PISA within your Github account.
 You can freely create your own *branch*, modify the code, and then *add* and *commit* changes to that branch within your fork of PISA.
-When you want to share your changes with `jllanfranchi/pisa`, you can then submit a *pull request* to `jllanfranchi/pisa` which can be merged by the PISA administrator (after the code is reviewed and tested, of course).
+When you want to share your changes with `IceCubeOpenSource/pisa`, you can then submit a *pull request* to `IceCubeOpenSource/pisa` which can be merged by the PISA administrator (after the code is reviewed and tested, of course).
 
-* Navigate to the [PISA github page](https://github.com/jllanfranchi/pisa) and fork the repository by clicking on the ![fork](images/ForkButton.png) button.
+* Navigate to the [PISA github page](https://github.com/IceCubeOpenSource/pisa) and fork the repository by clicking on the ![fork](images/ForkButton.png) button.
 * Clone the repository into the `$PISA` directory via one of the following commands (`<github username>` is your Github username):
   * either SSH access to repo:<br>
 `git clone git@github.com:<github username>/pisa.git $PISA
@@ -147,9 +148,9 @@ If you just wish to pull changes from github (and not submit any changes back), 
 
 * Clone the repository into the `$PISA` directory via one of the following commands:
   * either SSH access to repo:<br>
-`git clone git@github.com:jllanfranchi/pisa.git $PISA`
+`git clone git@github.com:IceCubeOpenSource/pisa.git $PISA`
   * or HTTPS access to repo:<br>
-`git clone https://github.com/jllanfranchi/pisa.git $PISA`
+`git clone https://github.com/IceCubeOpenSource/pisa.git $PISA`
 
 
 ### Ensure a clean install using virtualenv or conda env
@@ -167,20 +168,17 @@ This is not quite as clean as a virtual environment, and the issue with coflicti
 ### Install PISA
 
 ```bash
-pip install -e $PISA[numba,develop] -r $PISA/requirements.txt -vvv
+pip install -e $PISA[develop] -vvv
 ```
 Explanation:
 * First, note that this is ***not run as administrator***. It is discouraged to do so (and has not been tested this way).
 * `-e $PISA` (or equivalently, `--editable $PISA`): Installs from source located at `$PISA` and  allows for changes to the source code within to be immediately propagated to your Python installation.
 Within the Python library tree, all files under `pisa` are links to your source code, so changes within your source are seen directly by the Python installation. Note that major changes to your source code (file names or directory structure changing) will require re-installation, though, for the links to be updated (see below for the command for re-installing).
-* `[numba,develop]` Specify optional dependency groups. You can omit any or all of these if your system does not support them or if you do not need them.
-* `-r $PISA/requirements.txt`: Specifies the file containing PISA's dependencies for `pip` to install prior to installing PISA.
-This file lives at `$PISA/requirements.txt`.
+* `[develop]` Specify optional dependency groups. You can omit any or all of these if your system does not support them or if you do not need them.
 * `-vvv` Be maximally verbose during the install. You'll see lots of messages, including warnings that are irrelevant, but if your installation fails, it's easiest to debug if you use `-vvv`.
 * If a specific compiler is set by the `CC` environment variable (`export CC=<path>`), it will be used; otherwise, the `cc` command will be run on the system for compiling C-code.
 
 __Notes:__
-* For PISA pi modules, the optional `numba` dependency is required
 * You can work with your installation using the usual git commands (pull, push, etc.). However, these ***won't recompile*** any of the extension (i.e. pyx, _C/C++_) libraries. See below for how to reinstall PISA when you need these to recompile.
 
 
@@ -189,7 +187,7 @@ __Notes:__
 Sometimes a change within PISA requires re-installation (particularly if a compiled module changes, the below forces re-compilation).
 
 ```bash
-pip install -e $PISA[numba,develop] -r $PISA/requirements.txt --force-reinstall -vvv
+pip install -e $PISA[develop] --force-reinstall -vvv
 ```
 
 Note that if files change names or locations, though, the above can still not be enough.

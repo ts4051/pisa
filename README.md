@@ -7,6 +7,8 @@
 [Contributors](CONTRIBUTORS.md) |
 [Others' work](EXTERNAL_ATTRIBUTION.md)
 
+:warning: **PISA master branch now uses python 3!** :warning:
+
 PISA (PINGU Simulation and Analysis) is software written to analyze the results (or expected results) of an experiment based on Monte Carlo simulation.
 
 In particular, PISA was written by and for the IceCube Collaboration for analyses employing the [IceCube Neutrino Observatory](https://icecube.wisc.edu/), including the [DeepCore](https://arxiv.org/abs/1109.6096) and the proposed [PINGU](https://arxiv.org/abs/1401.2046) low-energy in-fill arrays.
@@ -33,7 +35,6 @@ However, PISA's methods apply equally well to high-MC situations, and PISA also 
 | `MANIFEST.in`             | Extra files to distribute with PISA package
 | `README.md`               | Brief overview of PISA
 | `pylintrc`                | PISA coding conventions for use with pylint
-| `requirements.txt`        | Hard dependencies, use with `pip install -r requirements.txt`
 | `setup.cfg`               | Setup file for `versioneer`
 | `setup.py`                | Python setup file, allowing e.g. `pip` installation
 | `versioneer.py`           | Automatic versioning
