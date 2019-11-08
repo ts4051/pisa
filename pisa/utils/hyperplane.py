@@ -124,7 +124,7 @@ class Hyperplane(object) :
         # Have one fit per bin
         self.intercept = np.full(self.binning.shape,self.initial_intercept,dtype=FTYPE)
         self.intercept_sigma = np.full_like(self.intercept,np.NaN)
-        for param in self.params.values() :
+        for param in list(self.params.values()) :
             param.init_fit_coefft_arrays(self.binning)
 
 
@@ -134,7 +134,7 @@ class Hyperplane(object) :
 
         # Store the nominal param values
         #TODO better checks, including not already set
-        for param in self.params.values() :
+        for param in list(self.params.values()) :
             param.nominal_value = nominal_param_values[param.name]
 
 
@@ -147,7 +147,7 @@ class Hyperplane(object) :
 
     @property
     def param_names(self) :
-        return self.params.keys()
+        return list(self.params.keys())
 
 
     def evaluate(self,param_values,bin_idx=None) :
@@ -165,10 +165,10 @@ class Hyperplane(object) :
 
         # Determine number of sys param values (per sys param)
         # This will be >1 when fitting, and == 1 when evaluating the hyperplane within the stage
-        num_param_values = np.asarray(param_values.values()[0]).size
+        num_param_values = np.asarray(list(param_values.values())[0]).size
 
         # Check same number of values for all sys params
-        for k,v in param_values.items() :
+        for k,v in list(param_values.items()) :
             n = np.asarray(v).size
             assert n == num_param_values, "All sys params must have the same number of values"
 
@@ -187,7 +187,7 @@ class Hyperplane(object) :
             #          Only support a single scalar value for each systematic parameters
             #          Use case is evaluating the hyperplanes during the hyperplane stage
             assert num_param_values == 1, "Can only provide one value per sys param when evaluating all bins simultaneously"
-            for v in param_values.values() :
+            for v in list(param_values.values()) :
                 assert np.isscalar(v), "sys param values must be a scalar when evaluating all bins simultaneously"
             out_shape = self.binning.shape
             bin_idx = Ellipsis
@@ -213,7 +213,7 @@ class Hyperplane(object) :
                 np.copyto( src=self.intercept[bin_idx], dst=out[bin_idx] )
 
         # Evaluate each individual parameter
-        for k,p in self.params.items() :
+        for k,p in list(self.params.items()) :
             p.evaluate(param_values[k],out=out,bin_idx=bin_idx)
 
         return out
@@ -221,15 +221,15 @@ class Hyperplane(object) :
 
     @property
     def nominal_values(self) :
-        return collections.OrderedDict([ (name,param.nominal_value) for name,param in self.params.items() ])
+        return collections.OrderedDict([ (name,param.nominal_value) for name,param in list(self.params.items()) ])
 
     @property
     def fit_param_values(self) :
-        return collections.OrderedDict([ (name,param.fit_param_values) for name,param in self.params.items() ])
+        return collections.OrderedDict([ (name,param.fit_param_values) for name,param in list(self.params.items()) ])
 
     @property
     def num_fit_sets(self) :
-        return self.params.values()[0].num_fit_sets
+        return list(self.params.values())[0].num_fit_sets
 
 
     def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True,method=None,smooth=False,smooth_kw=None) :
@@ -277,15 +277,15 @@ class Hyperplane(object) :
         self.fit_maps_raw = maps
 
         # Convert params values from `list of dicts` to `dict of lists`
-        param_values_dict = { name:np.array([ p[name] for p in param_values ]) for name in param_values[0].keys() }
+        param_values_dict = { name:np.array([ p[name] for p in param_values ]) for name in list(param_values[0].keys()) }
 
         # Save the param values used for fitting in the param objects (useful for plotting later)
-        for name,values in param_values_dict.items() :
+        for name,values in list(param_values_dict.items()) :
             self.params[name].fit_param_values = values
 
         # Format the fit `x` values : [ [sys param 0 values], [sys param 1 values], ... ]
         # Order of the params must match the order in `self.params`
-        x = np.asarray( [ param_values_dict[param_name] for param_name in self.params.keys() ], dtype=FTYPE )
+        x = np.asarray( [ param_values_dict[param_name] for param_name in list(self.params.keys()) ], dtype=FTYPE )
 
         # Prepare covariance matrix array
         self.fit_cov_mat = np.full( list(self.binning.shape)+[self.num_fit_coeffts,self.num_fit_coeffts] ,np.NaN )
@@ -299,7 +299,7 @@ class Hyperplane(object) :
         # Can be useful for poorlt populated templates
         if smooth :
 
-            assert isinstance(smooth,basestring), "`smooth` should be a string, found %s %s" % (smooth,type(smooth)) 
+            assert isinstance(smooth,str), "`smooth` should be a string, found %s %s" % (smooth,type(smooth)) 
 
             if smooth_kw is None :
                 smooth_kw = {}
@@ -412,7 +412,7 @@ class Hyperplane(object) :
             # #TODO REMOVE
 
             # Get flat list of the fit param guesses
-            p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in self.params.values() for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
+            p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in list(self.params.values()) for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
 
 
             #
@@ -449,7 +449,7 @@ class Hyperplane(object) :
                     # Unflatten list of the func/shape params, and write them to the hyperplane structure
                     self.intercept[bin_idx] = p[0]
                     i = 1
-                    for param in self.params.values() :
+                    for param in list(self.params.values()) :
                         for j in range(param.num_fit_coeffts) :
                             bin_fit_idx = tuple( list(bin_idx) + [j] )
                             param.fit_coeffts[bin_fit_idx] = p[i]
@@ -458,7 +458,7 @@ class Hyperplane(object) :
                     # Unflatten sys param values
                     params_unflattened = collections.OrderedDict()
                     for i in range(len(self.params)) :
-                        param_name = self.params.keys()[i]
+                        param_name = list(self.params.keys())[i]
                         params_unflattened[param_name] = x[i]
 
                     return self.evaluate(params_unflattened,bin_idx=bin_idx)
@@ -500,7 +500,7 @@ class Hyperplane(object) :
                     p0=p0,
                     sigma=y_sigma_to_use,
                     absolute_sigma=True, #TODO check this is really what we want
-                    maxfev=1000000l, #TODO arg?
+                    maxfev=1000000, #TODO arg?
                     method=self.fit_method,
                     **curve_fit_kw
                 )
@@ -529,7 +529,7 @@ class Hyperplane(object) :
             self.intercept[bin_idx] = popt[i]
             self.intercept_sigma[bin_idx] = np.NaN if corr_vals is None else corr_vals[i].std_dev
             i += 1
-            for param in self.params.values() :
+            for param in list(self.params.values()) :
                 for j in range(param.num_fit_coeffts) :
                     idx = param.get_fit_coefft_idx(bin_idx=bin_idx,coefft_idx=j)
                     param.fit_coeffts[idx] = popt[i]
@@ -553,7 +553,7 @@ class Hyperplane(object) :
         for i_set in range(self.num_fit_sets) :
 
             # Get expected bin values according tohyperplane value
-            predicted = self.evaluate({ name:values[i_set] for name,values in param_values_dict.items() })
+            predicted = self.evaluate({ name:values[i_set] for name,values in list(param_values_dict.items()) })
 
             # Get the observed value
             observed = self.fit_maps[i_set].nominal_values
@@ -582,7 +582,7 @@ class Hyperplane(object) :
 
         nom_mask = np.ones((self.num_fit_sets,),dtype=bool)
 
-        for param in self.params.values() :
+        for param in list(self.params.values()) :
             nom_mask = nom_mask & np.isclose(param.fit_param_values,param.nominal_value) 
 
         return nom_mask
@@ -598,7 +598,7 @@ class Hyperplane(object) :
         on_axis_mask = np.ones((self.num_fit_sets,),dtype=bool)
 
         # Loop over sys params
-        for param in self.params.values() :
+        for param in list(self.params.values()) :
 
             # Ignore the chosen param
             if param.name  != param_name :
@@ -620,7 +620,7 @@ class Hyperplane(object) :
         for bin_idx in bin_indices :
             print("  Bin %s :" % (bin_idx,) )
             print("     Intercept : %0.3g" % (self.intercept[bin_idx],) )
-            for param in self.params.values() :
+            for param in list(self.params.values()) :
                 print("     %s : %s" % ( param.name, ", ".join([ "%0.3g"%param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=cft_idx) for cft_idx in range(param.num_fit_coeffts) ])) )
         print("<<<<<< Fit coefficients <<<<<<")
 
@@ -634,7 +634,7 @@ class Hyperplane(object) :
 
     @property
     def num_fit_sets(self) :
-        return len(self.fit_param_values.values()[0])
+        return len(list(self.fit_param_values.values())[0])
 
 
     @property
@@ -643,7 +643,7 @@ class Hyperplane(object) :
         Return the total number of coefficients to fit
         This is the overall intercept, plus the coefficients for each individual param
         '''
-        return int( 1 + np.sum([ param.num_fit_coeffts for param in self.params.values() ]) )
+        return int( 1 + np.sum([ param.num_fit_coeffts for param in list(self.params.values()) ]) )
 
 
     @property
@@ -655,7 +655,7 @@ class Hyperplane(object) :
         '''
         
         array = [self.intercept]
-        for param in self.params.values() :
+        for param in list(self.params.values()) :
             for i in range(param.num_fit_coeffts) :
                 array.append( param.get_fit_coefft(coefft_idx=i) )
         array = np.stack(array,axis=-1)
@@ -667,7 +667,7 @@ class Hyperplane(object) :
         '''
         Return labels for each fit coefficient
         '''
-        return ["intercept"] + [ "%s p%i"%(param.name,i) for param in self.params.values() for i in range(param.num_fit_coeffts) ]
+        return ["intercept"] + [ "%s p%i"%(param.name,i) for param in list(self.params.values()) for i in range(param.num_fit_coeffts) ]
 
 
     @property
@@ -691,7 +691,7 @@ class Hyperplane(object) :
             state["fit_method"] = self.fit_method
 
             state["params"] = collections.OrderedDict()
-            for name,param in self.params.items() :
+            for name,param in list(self.params.items()) :
                 state["params"][name] = param.serializable_state
 
             self._serializable_state = state
@@ -731,7 +731,7 @@ class Hyperplane(object) :
 
         # Loop through params in the state        
         params_state = state.pop("params")
-        for param_name,param_state in params_state.items() :
+        for param_name,param_state in list(params_state.items()) :
 
             # Create the param
             param = HyperplaneParam(
@@ -741,7 +741,7 @@ class Hyperplane(object) :
             )
 
             # Define rest of state
-            for k in param_state.keys() :
+            for k in list(param_state.keys()) :
                 setattr(param,k,param_state.pop(k))
                 # print param.name,k,type(getattr(param,k)),getattr(param,k)
 
@@ -769,7 +769,7 @@ class Hyperplane(object) :
         hyperplane.fit_maps_norm = None if fit_maps_norm is None else [ Map(**map_state) for map_state in fit_maps_norm ]
 
         # Define rest of state
-        for k in state.keys() :
+        for k in list(state.keys()) :
             setattr(hyperplane,k,state.pop(k))
             # print k,type(getattr(hyperplane,k)),getattr(hyperplane,k)
 
@@ -796,7 +796,7 @@ class Hyperplane(object) :
 class HyperplaneParam(object) :
     '''
     A class defining the systematic parameter in the hyperplane
-    Use constructs this by passing the functional form (as a function)
+    User constructs this by passing the functional form (as a function)
     '''
 
     def __init__(self,name,func_name,initial_fit_coeffts=None) :
@@ -825,8 +825,8 @@ class HyperplaneParam(object) :
         #
 
         # Get the function
-        self.func_name = func_name
-        self._func = self.get_func(self.func_name)
+        self.__name__ = func_name
+        self._func = self.get_func(self.__name__)
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
@@ -852,14 +852,14 @@ class HyperplaneParam(object) :
         of the pre-defined functions.
         '''
 
-        assert isinstance(func_name,basestring), "'func_name' must be a string"
+        assert isinstance(func_name,str), "'func_name' must be a string"
 
         # Form the expected function name
         hyperplane_func_suffix = "_hyperplane_func"
         fullfunc_name = func_name + hyperplane_func_suffix
 
         # Find all functions
-        all_hyperplane_functions = { k:v for k,v in globals().items() if k.endswith(hyperplane_func_suffix) }
+        all_hyperplane_functions = { k:v for k,v in list(globals().items()) if k.endswith(hyperplane_func_suffix) }
         assert fullfunc_name in all_hyperplane_functions, "Cannot find hyperplane function '%s', choose from %s" % (func_name,[f.split(hyperplane_func_suffix)[0] for f in all_hyperplane_functions])
         return all_hyperplane_functions[fullfunc_name]
 
@@ -955,7 +955,7 @@ class HyperplaneParam(object) :
 
             state = collections.OrderedDict()
             state["name"] = self.name
-            state["func_name"] = self.func_name
+            state["func_name"] = self.__name__
             state["num_fit_coeffts"] = self.num_fit_coeffts
             state["fit_coeffts"] = self.fit_coeffts
             state["fit_coeffts_sigma"] = self.fit_coeffts_sigma
@@ -1102,7 +1102,7 @@ def load_hyperplanes(input_file) :
 
     # Loop over hyperplane states and load them
     hyperlanes = collections.OrderedDict()
-    for map_name,hyperplane_state in hyperplane_states.items() :
+    for map_name,hyperplane_state in list(hyperplane_states.items()) :
         hyperlanes[map_name] = Hyperplane.from_state(hyperplane_state)
 
     return hyperlanes
@@ -1141,7 +1141,7 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
     # Then calculate the hyperplane value at each point, using the nominal values for all other sys params
     x_plot = np.linspace( np.nanmin(param.fit_param_values), np.nanmax(param.fit_param_values), num=100 )
     params_for_plot = { param.name : x_plot, }
-    for p in hyperplane.params.values() :
+    for p in list(hyperplane.params.values()) :
         if p.name != param.name :
             params_for_plot[p.name] = np.full_like(x_plot,hyperplane.nominal_values[p.name])
     y_plot = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
@@ -1193,7 +1193,7 @@ def plot_bin_fits_2d(ax,hyperplane,bin_idx,param_names) :
     p1_on_axis_mask = hyperplane.get_on_axis_mask(p1.name) & (~nominal_mask)
 
     off_axis_mask = np.ones_like(p1_on_axis_mask,dtype=bool)
-    for p in hyperplane.params.values() : # Ignore points that are off-axis for other params
+    for p in list(hyperplane.params.values()) : # Ignore points that are off-axis for other params
         if p.name not in param_names :
             off_axis_mask = off_axis_mask & (p.fit_param_values == p.nominal_value)
     off_axis_mask = off_axis_mask & ~(p0_on_axis_mask | p1_on_axis_mask | nominal_mask)
@@ -1210,8 +1210,8 @@ def plot_bin_fits_2d(ax,hyperplane,bin_idx,param_names) :
     x_grid_flat = x_grid.flatten()
     y_grid_flat = y_grid.flatten()
     params_for_plot = { p0.name : x_grid_flat, p1.name : y_grid_flat, }
-    for p in hyperplane.params.values() :
-        if p.name not in params_for_plot.keys() :
+    for p in list(hyperplane.params.values()) :
+        if p.name not in list(params_for_plot.keys()) :
             params_for_plot[p.name] = np.full_like(x_grid_flat,hyperplane.nominal_values[p.name])
     z_grid_flat = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
     z_grid = z_grid_flat.reshape(x_grid.shape)
@@ -1274,7 +1274,7 @@ if __name__ == "__main__" :
         sys_param_values_dict["bar"] = [20.,30.,0.,10.,10., 15.]
 
     # Get number of datasets
-    num_sys_datasets = len(sys_param_values_dict.values()[0])
+    num_sys_datasets = len(list(sys_param_values_dict.values())[0])
 
     # Only consider one particle type for simplicity
     particle_key = "nue_cc"
@@ -1299,7 +1299,7 @@ if __name__ == "__main__" :
     sys_maps = []
     sys_param_values = []
     for i in range(num_sys_datasets) :
-        sys_param_values.append( { name:sys_param_values_dict[name][i] for name in true_hyperplane.params.keys() } )
+        sys_param_values.append( { name:sys_param_values_dict[name][i] for name in list(true_hyperplane.params.keys()) } )
         hist = true_hyperplane.evaluate(sys_param_values[-1])
         sys_maps.append( Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist)) )
 
