@@ -1,5 +1,5 @@
 """
-PISA pi stage to apply hyperplane fits from discrete systematics parameterizations
+PISA pi stage to apply hypersurface fits from discrete systematics parameterizations
 """
 
 from __future__ import absolute_import, print_function, division
@@ -16,10 +16,10 @@ from pisa.utils.fileio import from_file
 from pisa.utils.log import logging
 from pisa.utils.numba_tools import WHERE
 from pisa.utils import vectorizer
-from pisa.utils.hyperplane import load_hyperplanes
+from pisa.utils.hypersurface import load_hypersurfaces
 from numba import guvectorize
 
-__all__ = ["pi_hyperplanes_new", "SIGNATURE", "eval_hyperplane"]
+__all__ = ["pi_hypersurfaces",]
 
 __author__ = "P. Eller, T. Ehrhardt, T. Stuttard, J.L. Lanfranchi"
 
@@ -39,15 +39,15 @@ __license__ = """Copyright (c) 2014-2018, The IceCube Collaboration
 
 
 # TODO: consider taking into account fit parameter covariances
-class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
+class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
     """
-    Service to apply hyperplane parameterisation produced by
+    Service to apply hypersurface parameterisation produced by
     `scripts.fit_discrete_sys_nd`
 
     Parameters
     ----------
     fit_results_file : str
-        Path to hyperplane fit results file, i.e. the JSON file produced by the
+        Path to hypersurface fit results file, i.e. the JSON file produced by the
         `pisa.scripts.fit_discrete_sys_nd.py` script
 
     params : ParamSet
@@ -79,12 +79,12 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
         # Store args
         self.fit_results_file = fit_results_file
 
-        # Load hyperplanes
-        self.hyperplanes = load_hyperplanes(self.fit_results_file)
+        # Load hypersurfaces
+        self.hypersurfaces = load_hypersurfaces(self.fit_results_file)
 
         # Get the expected param names
          #TODO change name from `fit` params
-        self.hyperplane_param_names = self.hyperplanes.values()[0].param_names
+        self.hypersurface_param_names = list(self.hypersurfaces.values())[0].param_names
 
         # -- Expected input / output names -- #
         input_names = ()
@@ -93,7 +93,7 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
         # -- Which keys are added or altered for the outputs during `apply` -- #
 
         input_calc_keys = ()
-        output_calc_keys = ("hyperplane_scalefactors",)
+        output_calc_keys = ("hypersurface_scalefactors",)
 
         if error_method == "sumw2":
             output_apply_keys = ("weights", "errors")
@@ -104,10 +104,10 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
 
         # -- Initialize base class -- #
 
-        super(pi_hyperplanes_new, self).__init__(
+        super(pi_hypersurfaces, self).__init__(
             data=data,
             params=params,
-            expected_params=self.hyperplane_param_names,
+            expected_params=self.hypersurface_param_names,
             input_names=input_names,
             output_names=output_names,
             debug_mode=debug_mode,
@@ -127,7 +127,7 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
         assert self.calc_mode == "binned"
         assert self.output_mode is not None
 
-        self.links = ast.literal_eval(links) #TODO directly use compile_regex from hyperplane?
+        self.links = ast.literal_eval(links) #TODO directly use compile_regex from hypersurface?
 
 
     def setup_function(self):
@@ -141,7 +141,7 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
 
         # create containers for scale factors
         for container in self.data :
-            container["hyperplane_scalefactors"] = np.empty(container.size, dtype=FTYPE)
+            container["hypersurface_scalefactors"] = np.empty(container.size, dtype=FTYPE)
 
         # Check binning compatibility
         #TODO binning hash
@@ -152,7 +152,7 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
         # Check map names match
         #TODO
 
-        # Check nominal values match between the stage params and the hyperplane params
+        # Check nominal values match between the stage params and the hypersurface params
         #TODO
 
         self.data.unlink_containers()
@@ -168,15 +168,15 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
 
         # Format the params dict
         #TODO handle units
-        # param_values = { sys_param_name: self.params[sys_param_name].m_as(units) for sys_param_name, units in zip(self.hyperplane_param_names, self.fit_param_units) } #TODO change name from fit params
-        param_values = { sys_param_name: self.params[sys_param_name].m for sys_param_name in self.hyperplane_param_names }
+        # param_values = { sys_param_name: self.params[sys_param_name].m_as(units) for sys_param_name, units in zip(self.hypersurface_param_names, self.fit_param_units) } #TODO change name from fit params
+        param_values = { sys_param_name: self.params[sys_param_name].m for sys_param_name in self.hypersurface_param_names }
 
-        # Evaluate the hyperplanes
+        # Evaluate the hypersurfaces
         for container in self.data:
 
-            # Get the hyperplane scale factors
+            # Get the hypersurface scale factors
             # Reshape to 1D array
-            scalefactors = self.hyperplanes[container.name].evaluate(param_values).reshape(container.size)
+            scalefactors = self.hypersurfaces[container.name].evaluate(param_values).reshape(container.size)
 
             # Where there are no scalefactors (e.g. empty bins), set scale factor to 1 
             #TODO maybe this should be handle by Hyperplane.evaluate directly??
@@ -184,8 +184,8 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
             
             # Add to container
             #TODO Directly modify the container in the first place
-            np.copyto( src=scalefactors, dst=container["hyperplane_scalefactors"].get(WHERE) )
-            container["hyperplane_scalefactors"].mark_changed()
+            np.copyto( src=scalefactors, dst=container["hypersurface_scalefactors"].get(WHERE) )
+            container["hypersurface_scalefactors"].mark_changed()
             #TODO verctorise, get(WHERE), mark_changed, etc
 
         # Unlink the containers again
@@ -196,17 +196,17 @@ class pi_hyperplanes_new(PiStage):  # pyint: disable=invalid-name
 
         for container in self.data:
 
-            # Update weights according to hyperplanes
+            # Update weights according to hypersurfaces
             vectorizer.multiply(
-                container["hyperplane_scalefactors"], container["weights"]
+                container["hypersurface_scalefactors"], container["weights"]
             )
 
             if self.error_method == "sumw2":
                 vectorizer.multiply(
-                    container["hyperplane_scalefactors"], container["errors"]
+                    container["hypersurface_scalefactors"], container["errors"]
                 )
 
-            # Correct negative event counts that can be introduced by hyperplanes (due to intercept)
+            # Correct negative event counts that can be introduced by hypersurfaces (due to intercept)
             #TODO probably can make this more efficient
             weights = container["weights"].get(WHERE)
             neg_mask = weights < 0.

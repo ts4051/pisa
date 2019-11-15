@@ -37,20 +37,22 @@ def get_num_args(func) :
 
 
 '''
-Hyperplane functional forms
+Hypersurface functional forms
 '''
 
-def linear_hyperplane_func(p,m,out) :
+#TODO support uncertainty propagation
+
+def linear_hypersurface_func(p,m,out) :
     '''
-    Linear hyperplane functional form
+    Linear hypersurface functional form
     '''
     result = m * p
     np.copyto(src=result,dst=out)
 
 
-def exponential_hyperplane_func(p,a,b,out) :
+def exponential_hypersurface_func(p,a,b,out) :
     '''
-    Exponential hyperplane functional form
+    Exponential hypersurface functional form
     '''
     result = a * np.exp(b*p)
     np.copyto(src=result,dst=out)
@@ -58,18 +60,18 @@ def exponential_hyperplane_func(p,a,b,out) :
 
 
 '''
-Core hyperplane classes
+Core hypersurface classes
 '''
 
-class Hyperplane(object) :
+class Hypersurface(object) :
     '''
-    A class defining the hyperplane
+    A class defining the hypersurface
 
     Contains :
       - The common intercept
       - Each systematic parameter, inside which the functional form is defined
 
-    The class has a fit method for fitting the hyperplane to some data (e.g. 
+    The class has a fit method for fitting the hypersurface to some data (e.g. 
     discrete systematics sets)
 
     I imagine :
@@ -78,10 +80,11 @@ class Hyperplane(object) :
       - Loading the hyperplans from a file in the PISA stage and calling the same `evaluate` method (possibly with some numba-fication)
     '''
 
-    def __init__(self,params,initial_intercept=None) :
+    def __init__(self,params,initial_intercept=None,debug=False) :
 
         # Store args
         self.initial_intercept = initial_intercept
+        self.debug = debug
 
         # Store params as dict for ease of lookup
         self.params = collections.OrderedDict()
@@ -106,7 +109,7 @@ class Hyperplane(object) :
 
     def _init(self,binning,nominal_param_values) :
         '''
-        Actually initialise the hyperplane
+        Actually initialise the hypersurface
         '''
 
         #
@@ -152,7 +155,7 @@ class Hyperplane(object) :
 
     def evaluate(self,param_values,bin_idx=None) :
         '''
-        Evaluate the hyperplane, using the systematic parameter values provided
+        Evaluate the hypersurface, using the systematic parameter values provided
         Uses the current internal values for all functional form parameters
         '''
 
@@ -164,7 +167,7 @@ class Hyperplane(object) :
         #
 
         # Determine number of sys param values (per sys param)
-        # This will be >1 when fitting, and == 1 when evaluating the hyperplane within the stage
+        # This will be >1 when fitting, and == 1 when evaluating the hypersurface within the stage
         num_param_values = np.asarray(list(param_values.values())[0]).size
 
         # Check same number of values for all sys params
@@ -185,7 +188,7 @@ class Hyperplane(object) :
         if not single_bin_mode:
             # Case 1 : Calculating for all bins simultaneously (e.g. `bin_idx is None`)
             #          Only support a single scalar value for each systematic parameters
-            #          Use case is evaluating the hyperplanes during the hyperplane stage
+            #          Use case is evaluating the hypersurfaces during the hypersurface stage
             assert num_param_values == 1, "Can only provide one value per sys param when evaluating all bins simultaneously"
             for v in list(param_values.values()) :
                 assert np.isscalar(v), "sys param values must be a scalar when evaluating all bins simultaneously"
@@ -194,7 +197,7 @@ class Hyperplane(object) :
 
         else :
             # Case 2 : Calculating for multiple sys param values, but only a single bin
-            #          Use case is fitting the hyperplanes fucntional form fit params
+            #          Use case is fitting the hypersurfaces fucntional form fit params
             out_shape = (num_param_values,)
 
         # Create the output array
@@ -202,7 +205,7 @@ class Hyperplane(object) :
 
 
         #
-        # Evaluate the hyperplane
+        # Evaluate the hypersurface
         #
 
         # Start with the intercept
@@ -248,7 +251,7 @@ class Hyperplane(object) :
         # Check the systematic parameter values
         #TODO
         # assert isinstance(param_values,collections.Mapping)
-        # assert set(param_values.keys()) == set(self.param_names), "`param_values` keys do not match the hyperplane's systematic params"
+        # assert set(param_values.keys()) == set(self.param_names), "`param_values` keys do not match the hypersurface's systematic params"
         # num_datasets = len(param_values.values()[0])
         # assert np.all(np.array([ len(x) for x in param_values.values()]) == num_datasets), "Each systematic parameter must have one value per dataset"
 
@@ -266,7 +269,7 @@ class Hyperplane(object) :
         if self.fit_method is None :
             self.fit_method = "lm"  # lm, trf, dogbox
 
-        # Initialise hyperplane using nominal dataset
+        # Initialise hypersurface using nominal dataset
         self._init(binning=nominal_map.binning,nominal_param_values=nominal_param_values)
 
         # Combine nominal and sys sets
@@ -333,7 +336,7 @@ class Hyperplane(object) :
         if norm :
 
             # Normalise the maps by dividing the nominal map
-            # This means the hyperplane results can be interpretted as a re-weighting factor, 
+            # This means the hypersurface results can be interpretted as a re-weighting factor, 
             # relative to the nominal
 
             # Formalise, handling inf values
@@ -353,7 +356,7 @@ class Hyperplane(object) :
         #
 
         # Not expecting any bins to have negative values (negative counts doesn't make sense)
-        #TODO hyperplane in general could consider -ve values (no explicitly tied to histograms), so maybe can relax this constraint
+        #TODO hypersurface in general could consider -ve values (no explicitly tied to histograms), so maybe can relax this constraint
         for m in self.fit_maps :
             assert np.all( m.nominal_values[finite_mask] >= 0. ), "Found negative bin counts"
 
@@ -437,7 +440,10 @@ class Hyperplane(object) :
                 #
                 # Fit
                 #
-                
+
+                # Must have at least as many sets as free params in fit or else curve_fit will fail
+                assert y.size >= p0.size, "Number of datasets fitted must be >= num free params"
+
                 # Define a callback function for use with `curve_fit`
                 #   x : sys params
                 #   p : func/shape params
@@ -446,7 +452,7 @@ class Hyperplane(object) :
                     # Note that this is using the dynamic variable `bin_idx`, which cannot be passed as 
                     # an arg as `curve_fit` cannot handle fixed parameters.
 
-                    # Unflatten list of the func/shape params, and write them to the hyperplane structure
+                    # Unflatten list of the func/shape params, and write them to the hypersurface structure
                     self.intercept[bin_idx] = p[0]
                     i = 1
                     for param in list(self.params.values()) :
@@ -468,17 +474,18 @@ class Hyperplane(object) :
                 # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
                 eps = np.finfo(FTYPE).eps
  
-                # if bin_idx == (0,0,0) :
-                #     print(">>>>>>>>>>>>>>>>>>>>>>>")
-                #     print("Curve fit inputs :")
-                #     print("  x           : %s" % x)
-                #     print("  y           : %s" % y)
-                #     print("  y old       : %s" % y_old)
-                #     print("  y sigma     : %s" % y_sigma)
-                #     print("  y sigma old : %s" % y_sigma_old)
-                #     print("  p0          : %s" % p0)
-                #     print("  fit method  : %s" % self.fit_method)
-                #     print("<<<<<<<<<<<<<<<<<<<<<<<")
+                #TODO REMOVE
+                if self.debug :
+                    test_bin_idx = (0,0,0) 
+                    if bin_idx == test_bin_idx :
+                        print(">>>>>>>>>>>>>>>>>>>>>>>")
+                        print("Curve fit inputs to bin %s :" % (bin_idx,) )
+                        print("  x           : %s" % x)
+                        print("  y           : %s" % y)
+                        print("  y sigma     : %s" % y_sigma)
+                        print("  p0          : %s" % p0)
+                        print("  fit method  : %s" % self.fit_method)
+                        print("<<<<<<<<<<<<<<<<<<<<<<<")
 
                 # Define some settings to use with `curve_fit` that vary with fit method
                 curve_fit_kw = {}
@@ -524,7 +531,7 @@ class Hyperplane(object) :
             # Fit may fail to determine covariance matrix (method-dependent), so only do this if have a finite covariance matrix
             corr_vals = correlated_values(popt,pcov) if np.all(np.isfinite(pcov)) else None
 
-            # Write the fitted param results (and sigma, if available) back to the hyperplane structure
+            # Write the fitted param results (and sigma, if available) back to the hypersurface structure
             i = 0
             self.intercept[bin_idx] = popt[i]
             self.intercept_sigma[bin_idx] = np.NaN if corr_vals is None else corr_vals[i].std_dev
@@ -544,7 +551,7 @@ class Hyperplane(object) :
         # chi2
         #
 
-        # Compare the result of the fitted hyperplane function with the actual data points used for fitting
+        # Compare the result of the fitted hypersurface function with the actual data points used for fitting
         # Compute the resulting chi2 to have an estimate of the fit quality
 
         self.fit_chi2 = []
@@ -552,7 +559,7 @@ class Hyperplane(object) :
         # Loop over datasets
         for i_set in range(self.num_fit_sets) :
 
-            # Get expected bin values according tohyperplane value
+            # Get expected bin values according tohypersurface value
             predicted = self.evaluate({ name:values[i_set] for name,values in list(param_values_dict.items()) })
 
             # Get the observed value
@@ -611,7 +618,7 @@ class Hyperplane(object) :
 
     def report(self,bin_idx=None) :
         '''
-        String version of the hyperplane contents
+        String version of the hypersurface contents
         '''
 
         # Fit results
@@ -734,7 +741,7 @@ class Hyperplane(object) :
         for param_name,param_state in list(params_state.items()) :
 
             # Create the param
-            param = HyperplaneParam(
+            param = HypersurfaceParam(
                 name=param_state.pop("name"),
                 func_name=param_state.pop("func_name"),
                 initial_fit_coeffts=param_state.pop("initial_fit_coeffts"),
@@ -750,35 +757,35 @@ class Hyperplane(object) :
 
 
         #
-        # Create hyperplane
+        # Create hypersurface
         #
 
         # Instantiate
-        hyperplane = cls(
+        hypersurface = cls(
             params=params,
             initial_intercept=state.pop("initial_intercept"),
         )
 
         # Add binning
-        hyperplane.binning = MultiDimBinning(**state.pop("binning"))
+        hypersurface.binning = MultiDimBinning(**state.pop("binning"))
 
         # Add maps
         fit_maps_raw = state.pop("fit_maps_raw")
-        hyperplane.fit_maps_raw = None if fit_maps_raw is None else [ Map(**map_state) for map_state in fit_maps_raw ]
+        hypersurface.fit_maps_raw = None if fit_maps_raw is None else [ Map(**map_state) for map_state in fit_maps_raw ]
         fit_maps_norm = state.pop("fit_maps_norm")
-        hyperplane.fit_maps_norm = None if fit_maps_norm is None else [ Map(**map_state) for map_state in fit_maps_norm ]
+        hypersurface.fit_maps_norm = None if fit_maps_norm is None else [ Map(**map_state) for map_state in fit_maps_norm ]
 
         # Define rest of state
         for k in list(state.keys()) :
-            setattr(hyperplane,k,state.pop(k))
-            # print k,type(getattr(hyperplane,k)),getattr(hyperplane,k)
+            setattr(hypersurface,k,state.pop(k))
+            # print k,type(getattr(hypersurface,k)),getattr(hypersurface,k)
 
-        return hyperplane
+        return hypersurface
 
 
     def smooth(self,method="gauss") :
         '''
-        Apply smoothing between bins for hyperplane coefficients
+        Apply smoothing between bins for hypersurface coefficients
         '''
 
         pass #TODO implement
@@ -787,15 +794,15 @@ class Hyperplane(object) :
 
         # # Smooth the params across neighbouring bins
         # if smooth == 'gauss':
-        #     hyperplanes["hyperplanes"][map_name]["fit_params_smooth"] = np.full_like(hyperplanes["hyperplanes"][map_name]["fit_params"],np.NaN) 
+        #     hypersurfaces["hypersurfaces"][map_name]["fit_params_smooth"] = np.full_like(hypersurfaces["hypersurfaces"][map_name]["fit_params"],np.NaN) 
         #     for i_fit_param in range(num_params) :
-        #         finite_mask = np.isfinite(hyperplanes["hyperplanes"][map_name]["fit_params"][...,i_fit_param])
-        #         hyperplanes["hyperplanes"][map_name]["fit_params_smooth"][...,i_fit_param][finite_mask] = gaussian_filter(hyperplanes["hyperplanes"][map_name]["fit_params"][...,i_fit_param][finite_mask],sigma=1.)
+        #         finite_mask = np.isfinite(hypersurfaces["hypersurfaces"][map_name]["fit_params"][...,i_fit_param])
+        #         hypersurfaces["hypersurfaces"][map_name]["fit_params_smooth"][...,i_fit_param][finite_mask] = gaussian_filter(hypersurfaces["hypersurfaces"][map_name]["fit_params"][...,i_fit_param][finite_mask],sigma=1.)
 
 
-class HyperplaneParam(object) :
+class HypersurfaceParam(object) :
     '''
-    A class defining the systematic parameter in the hyperplane
+    A class defining the systematic parameter in the hypersurface
     User constructs this by passing the functional form (as a function)
     '''
 
@@ -846,7 +853,7 @@ class HyperplaneParam(object) :
 
     def get_func(self,func_name) :
         '''
-        Find the function defining the hyperplane functional form.
+        Find the function defining the hypersurface functional form.
 
         User specifies this by it's string name, which must correspond to one 
         of the pre-defined functions.
@@ -855,13 +862,13 @@ class HyperplaneParam(object) :
         assert isinstance(func_name,str), "'func_name' must be a string"
 
         # Form the expected function name
-        hyperplane_func_suffix = "_hyperplane_func"
-        fullfunc_name = func_name + hyperplane_func_suffix
+        hypersurface_func_suffix = "_hypersurface_func"
+        fullfunc_name = func_name + hypersurface_func_suffix
 
         # Find all functions
-        all_hyperplane_functions = { k:v for k,v in list(globals().items()) if k.endswith(hyperplane_func_suffix) }
-        assert fullfunc_name in all_hyperplane_functions, "Cannot find hyperplane function '%s', choose from %s" % (func_name,[f.split(hyperplane_func_suffix)[0] for f in all_hyperplane_functions])
-        return all_hyperplane_functions[fullfunc_name]
+        all_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_func_suffix) }
+        assert fullfunc_name in all_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_func_suffix)[0] for f in all_hypersurface_functions])
+        return all_hypersurface_functions[fullfunc_name]
 
 
     def init_fit_coefft_arrays(self,binning) :
@@ -908,7 +915,7 @@ class HyperplaneParam(object) :
         # Call the function
         self._func(*args)
 
-        # Add to overall hyperplane result
+        # Add to overall hypersurface result
         out += this_out
 
 
@@ -971,24 +978,47 @@ class HyperplaneParam(object) :
 
 
 '''
-Hyperplane fitting and loading
+Hypersurface fitting and loading
 '''
 
-def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_regex=None,**kw) :
+def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None, **kw) :
     '''
-    Function for fitting hyperplanes to simulation dataset
+    Function for fitting hypersurfaces to simulation dataset
     '''
 
     #TODO proper docs
+
+    # Take (deep) copies of lists/dicts to avoid modifying the originals
+    # Useful for cases where this function is called in a loop (e.g. leave-one-out tests)
+    nominal_dataset = copy.deepcopy(nominal_dataset)
+    sys_datasets = copy.deepcopy(sys_datasets)
+    params = copy.deepcopy(params)
+
 
     #
     # Check inputs
     #
 
-    #TODO
+    # Check types
+    assert isinstance(sys_datasets, collections.Sequence)
+    assert isinstance(params, collections.Sequence)
+    assert isinstance(output_dir, str)
+    assert isinstance(tag, str)
+
+    # Check formatting of datasets is as expected
+    all_datasets = [ nominal_dataset ] + sys_datasets
+    for dataset in all_datasets :
+        assert isinstance(dataset, collections.Mapping)
+        assert "pipeline_cfg" in dataset
+        assert "sys_params" in dataset
+
+    # Check params
+    assert len(params) >= 1
+    for p in params :
+        assert isinstance(p, HypersurfaceParam)
 
     # Report inputs
-    print("Hyperplane fit details :")
+    print("Hypersurface fit details :")
     print("  Num params           : %i" % len(params) )
     # print("  Num fit coefficients : %i")
     print("  Num datasets         : 1 nominal + %i systematics" % len(sys_datasets) )
@@ -996,16 +1026,13 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
 
 
     #
-    # Run all pipelines
+    # Generate MapSets
     #
 
-    # Create and run the nominal and systematics pipelines (using the pipeline configs provided)
-    #TODO DistributionMaker
-    nominal_dataset["pipeline"] = Pipeline(nominal_dataset["pipeline_cfg"])
-    nominal_dataset["mapset"] = nominal_dataset["pipeline"].get_outputs() #return_sum=False)
+    # Create and run the nominal and systematics pipelines (using the pipeline configs provided) to get maps
+    nominal_dataset["mapset"] = Pipeline(nominal_dataset["pipeline_cfg"]).get_outputs() #return_sum=False)
     for sys_dataset in sys_datasets :
-        sys_dataset["pipeline"] = Pipeline(sys_dataset["pipeline_cfg"])
-        sys_dataset["mapset"] = sys_dataset["pipeline"].get_outputs() #return_sum=False)
+        sys_dataset["mapset"] = Pipeline(sys_dataset["pipeline_cfg"]).get_outputs() #return_sum=False)
 
     # Merge maps according to the combine regex, is one was provided
     if combine_regex is not None :
@@ -1015,7 +1042,7 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
 
     #TODO check every mapset has the same elements
 
-    #TODO Should I add functionality to store the map combining info (such as compare regex) in a way that means don't need to also specify `links` in the hyperplane stage
+    #TODO Should I add functionality to store the map combining info (such as compare regex) in a way that means don't need to also specify `links` in the hypersurface stage
 
 
     #
@@ -1023,7 +1050,7 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
     #
 
     # Create the container to fill
-    hyperplanes = collections.OrderedDict()
+    hypersurfaces = collections.OrderedDict()
 
     # Loop over maps
     for map_name in nominal_dataset["mapset"].names :
@@ -1041,17 +1068,17 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
 
 
         #
-        # Fit the hyperplane
+        # Fit the hypersurface
         #
 
-        # Create the hyperplane
-        hyperplane = Hyperplane( 
+        # Create the hypersurface
+        hypersurface = Hypersurface( 
             params=copy.deepcopy(params),
             initial_intercept=1., # Initial value for intercept
         )
 
         # Perform fit
-        hyperplane.fit(
+        hypersurface.fit(
             nominal_map=nominal_map,
             nominal_param_values=nominal_param_values,
             sys_maps=sys_maps,
@@ -1061,11 +1088,11 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
         )
 
         # Report the results
-        print("\nFitted hyperplane report:")
-        hyperplane.report()
+        # print("\nFitted hypersurface report:")
+        # hypersurface.report()
 
         # Store for later write to disk
-        hyperplanes[map_name] = hyperplane
+        hypersurfaces[map_name] = hypersurface
 
 
     #
@@ -1073,37 +1100,39 @@ def fit_hyperplanes(nominal_dataset,sys_datasets,params,output_dir,tag,combine_r
     #
 
     # Create a file name
-    num_dims = len(hyperplane.params)
-    param_str = "_".join(hyperplane.param_names)
-    output_file = "%s__hyperplane_fits__%dd__%s.json" % (tag, num_dims, param_str)
+    num_dims = len(hypersurface.params)
+    param_str = "_".join(hypersurface.param_names)
+    output_file = "%s__hypersurface_fits__%dd__%s.json" % (tag, num_dims, param_str)
     output_path = os.path.join(output_dir,output_file)
 
     # Create the output directory
     mkdir(output_dir)
 
     # Write to a json file
-    to_json(hyperplanes,output_path)
+    to_json(hypersurfaces,output_path)
 
     print("Fit results written : %s" % output_path)
 
+    return output_dir
 
 
-def load_hyperplanes(input_file) :
+
+def load_hypersurfaces(input_file) :
     '''
-    Function to load file containing hyperplane fits
-    Can be multiple hyperplanes assosicated with different map keys
+    Function to load file containing hypersurface fits
+    Can be multiple hypersurfaces assosicated with different map keys
     '''
 
     #TODO backwards compatibility
 
     # Load the file
-    hyperplane_states = from_json(input_file)
-    assert isinstance(hyperplane_states,collections.Mapping)
+    hypersurface_states = from_json(input_file)
+    assert isinstance(hypersurface_states,collections.Mapping)
 
-    # Loop over hyperplane states and load them
+    # Loop over hypersurface states and load them
     hyperlanes = collections.OrderedDict()
-    for map_name,hyperplane_state in list(hyperplane_states.items()) :
-        hyperlanes[map_name] = Hyperplane.from_state(hyperplane_state)
+    for map_name,hypersurface_state in list(hypersurface_states.items()) :
+        hyperlanes[map_name] = Hypersurface.from_state(hypersurface_state)
 
     return hyperlanes
 
@@ -1113,22 +1142,22 @@ def load_hyperplanes(input_file) :
 Plotting
 '''
 
-def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_nominal=False) :
+def plot_bin_fits(ax,hypersurface,bin_idx,param_name,color=None,label=None,show_nominal=False) :
 
     import matplotlib.pyplot as plt
 
     # Get the param
-    param = hyperplane.params[param_name]
+    param = hypersurface.params[param_name]
 
     # Check bin index
-    assert len(bin_idx) == len(hyperplane.binning.shape)
+    assert len(bin_idx) == len(hypersurface.binning.shape)
 
     # Get bin values for this bin only
-    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hyperplane.fit_maps ]
-    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hyperplane.fit_maps ]
+    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hypersurface.fit_maps ]
+    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hypersurface.fit_maps ]
 
     # Define a mask for selecting on-axis points only
-    on_axis_mask = hyperplane.get_on_axis_mask(param.name)
+    on_axis_mask = hypersurface.get_on_axis_mask(param.name)
 
     # Plot the points from the datasets used for fitting
     x = np.asarray(param.fit_param_values)[on_axis_mask]
@@ -1136,15 +1165,15 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
     yerr = np.asarray(chosen_bin_sigma)[on_axis_mask]
     ax.errorbar( x=x, y=y, yerr=yerr, marker="o", color=("black" if color is None else color), linestyle="None", label=label )
 
-    # Plot the hyperplane
+    # Plot the hypersurface
     # Generate as bunch of values along the sys param axis to make the plot
-    # Then calculate the hyperplane value at each point, using the nominal values for all other sys params
+    # Then calculate the hypersurface value at each point, using the nominal values for all other sys params
     x_plot = np.linspace( np.nanmin(param.fit_param_values), np.nanmax(param.fit_param_values), num=100 )
     params_for_plot = { param.name : x_plot, }
-    for p in list(hyperplane.params.values()) :
+    for p in list(hypersurface.params.values()) :
         if p.name != param.name :
-            params_for_plot[p.name] = np.full_like(x_plot,hyperplane.nominal_values[p.name])
-    y_plot = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
+            params_for_plot[p.name] = np.full_like(x_plot,hypersurface.nominal_values[p.name])
+    y_plot = hypersurface.evaluate(params_for_plot,bin_idx=bin_idx)
     ax.plot( x_plot, y_plot, color=("red" if color is None else color) )
 
     #TODO Add fit uncertainty. Problem using uarrays with np.exp at the minute, may need to shift to bin-wise calc...
@@ -1153,9 +1182,9 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
     # # Optonal : For testing, overlay the uncertainty one would find under the assumption fit parameters are uncorrelated
     # # Typically straight line fit parameters are strongly correlated, so expect this to be a large overestimation
     # if False :
-    #     cov_mat = fit_results["hyperplanes"][map_name]["cov_matrices"][:,:,zind][idx]
+    #     cov_mat = fit_results["hypersurfaces"][map_name]["cov_matrices"][:,:,zind][idx]
     #     fit_params_uncorr = unp.uarray( unp.nominal_values(fit_params) , np.sqrt(np.diag(cov_mat)) )
-    #     y_opt_uncorr = hyperplane_fun(curve_x, *fit_params_uncorr)
+    #     y_opt_uncorr = hypersurface_fun(curve_x, *fit_params_uncorr)
     #     ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt_uncorr)-unp.std_devs(y_opt_uncorr), unp.nominal_values(y_opt_uncorr)+unp.std_devs(y_opt_uncorr), color='blue', alpha=0.5 )
 
     # Mark the nominal value
@@ -1170,30 +1199,30 @@ def plot_bin_fits(ax,hyperplane,bin_idx,param_name,color=None,label=None,show_no
 
 
 
-def plot_bin_fits_2d(ax,hyperplane,bin_idx,param_names) :
+def plot_bin_fits_2d(ax,hypersurface,bin_idx,param_names) :
 
     import matplotlib.pyplot as plt
 
     assert len(param_names) == 2
-    assert len(bin_idx) == len(hyperplane.binning.shape)
+    assert len(bin_idx) == len(hypersurface.binning.shape)
 
     # Get bin values for this bin only
-    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hyperplane.fit_maps ]
-    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hyperplane.fit_maps ]
+    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hypersurface.fit_maps ]
+    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hypersurface.fit_maps ]
 
-    p0 = hyperplane.params[param_names[0]]
-    p1 = hyperplane.params[param_names[1]]
+    p0 = hypersurface.params[param_names[0]]
+    p1 = hypersurface.params[param_names[1]]
 
     z = np.asarray(chosen_bin_values)
     # zerr = #TODO error bars
 
     # Choose categories of points to plot
-    nominal_mask = hyperplane.get_nominal_mask()
-    p0_on_axis_mask = hyperplane.get_on_axis_mask(p0.name) & (~nominal_mask)
-    p1_on_axis_mask = hyperplane.get_on_axis_mask(p1.name) & (~nominal_mask)
+    nominal_mask = hypersurface.get_nominal_mask()
+    p0_on_axis_mask = hypersurface.get_on_axis_mask(p0.name) & (~nominal_mask)
+    p1_on_axis_mask = hypersurface.get_on_axis_mask(p1.name) & (~nominal_mask)
 
     off_axis_mask = np.ones_like(p1_on_axis_mask,dtype=bool)
-    for p in list(hyperplane.params.values()) : # Ignore points that are off-axis for other params
+    for p in list(hypersurface.params.values()) : # Ignore points that are off-axis for other params
         if p.name not in param_names :
             off_axis_mask = off_axis_mask & (p.fit_param_values == p.nominal_value)
     off_axis_mask = off_axis_mask & ~(p0_on_axis_mask | p1_on_axis_mask | nominal_mask)
@@ -1203,19 +1232,19 @@ def plot_bin_fits_2d(ax,hyperplane,bin_idx,param_names) :
     ax.scatter( p0.fit_param_values[off_axis_mask], p1.fit_param_values[off_axis_mask], z[off_axis_mask], marker="s", color="black", label="Off-axis" )
     ax.scatter( p0.fit_param_values[nominal_mask], p1.fit_param_values[nominal_mask], z[nominal_mask], marker="*", color="magenta", label="Nominal" )
 
-    # Plot hyperplane (as a surface)
+    # Plot hypersurface (as a surface)
     x_plot = np.linspace( p0.fit_param_values.min(), p0.fit_param_values.max(), num=100 )
     y_plot = np.linspace( p1.fit_param_values.min(), p1.fit_param_values.max(), num=100 )
     x_grid, y_grid = np.meshgrid(x_plot,y_plot)
     x_grid_flat = x_grid.flatten()
     y_grid_flat = y_grid.flatten()
     params_for_plot = { p0.name : x_grid_flat, p1.name : y_grid_flat, }
-    for p in list(hyperplane.params.values()) :
+    for p in list(hypersurface.params.values()) :
         if p.name not in list(params_for_plot.keys()) :
-            params_for_plot[p.name] = np.full_like(x_grid_flat,hyperplane.nominal_values[p.name])
-    z_grid_flat = hyperplane.evaluate(params_for_plot,bin_idx=bin_idx)
+            params_for_plot[p.name] = np.full_like(x_grid_flat,hypersurface.nominal_values[p.name])
+    z_grid_flat = hypersurface.evaluate(params_for_plot,bin_idx=bin_idx)
     z_grid = z_grid_flat.reshape(x_grid.shape)
-    surf = ax.plot_surface( x_grid, y_grid, z_grid, cmap="viridis", linewidth=0, antialiased=False, alpha=0.2 )#, label="Hyperplane" )
+    surf = ax.plot_surface( x_grid, y_grid, z_grid, cmap="viridis", linewidth=0, antialiased=False, alpha=0.2 )#, label="Hypersurface" )
 
     # Format
     ax.set_xlabel(p0.name)
@@ -1231,17 +1260,17 @@ if __name__ == "__main__" :
     #TODO turn this into a PASS/FAIL test, and add more detailed test of specific functions
 
     #
-    # Create hyperplane
+    # Create hypersurface
     #
 
-    # Define systematic parameters in the hyperplane
+    # Define systematic parameters in the hypersurface
     params = [
-        HyperplaneParam( name="foo", func_name="linear", initial_fit_coeffts=[1.], ),
-        HyperplaneParam( name="bar", func_name="exponential", initial_fit_coeffts=[1.,-1.], ),
+        HypersurfaceParam( name="foo", func_name="linear", initial_fit_coeffts=[1.], ),
+        HypersurfaceParam( name="bar", func_name="exponential", initial_fit_coeffts=[1.,-1.], ),
     ]
 
-    # Create the hyperplane
-    hyperplane = Hyperplane( 
+    # Create the hypersurface
+    hypersurface = Hypersurface( 
         params=params, # Specify the systematic parameters
         initial_intercept=0., # Intercept value (or first guess for fit)
     )
@@ -1279,37 +1308,37 @@ if __name__ == "__main__" :
     # Only consider one particle type for simplicity
     particle_key = "nue_cc"
 
-    # Create a dummy "true" hyperplane that can be used to generate some fake bin values for the dataset 
-    true_hyperplane = copy.deepcopy(hyperplane)
-    true_hyperplane._init(binning=binning,nominal_param_values=nom_param_values)
-    true_hyperplane.intercept.fill(3.)
-    if "foo" in true_hyperplane.params :
-        true_hyperplane.params["foo"].fit_coeffts[...,0].fill(2.)
-    if "bar" in true_hyperplane.params :
-        # true_hyperplane.params["bar"].fit_coeffts[...,0].fill(2.)
-        true_hyperplane.params["bar"].fit_coeffts[...,0].fill(5.)
-        true_hyperplane.params["bar"].fit_coeffts[...,1].fill(-0.1)
+    # Create a dummy "true" hypersurface that can be used to generate some fake bin values for the dataset 
+    true_hypersurface = copy.deepcopy(hypersurface)
+    true_hypersurface._init(binning=binning,nominal_param_values=nom_param_values)
+    true_hypersurface.intercept.fill(3.)
+    if "foo" in true_hypersurface.params :
+        true_hypersurface.params["foo"].fit_coeffts[...,0].fill(2.)
+    if "bar" in true_hypersurface.params :
+        # true_hypersurface.params["bar"].fit_coeffts[...,0].fill(2.)
+        true_hypersurface.params["bar"].fit_coeffts[...,0].fill(5.)
+        true_hypersurface.params["bar"].fit_coeffts[...,1].fill(-0.1)
 
-    print("\nTruth hyperplane report:")
-    true_hyperplane.report()
+    print("\nTruth hypersurface report:")
+    true_hypersurface.report()
 
     # Create each dataset, e.g. set the systematic parameter values, calculate a bin count
-    hist = true_hyperplane.evaluate(nom_param_values)
+    hist = true_hypersurface.evaluate(nom_param_values)
     nom_map = Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist))
     sys_maps = []
     sys_param_values = []
     for i in range(num_sys_datasets) :
-        sys_param_values.append( { name:sys_param_values_dict[name][i] for name in list(true_hyperplane.params.keys()) } )
-        hist = true_hyperplane.evaluate(sys_param_values[-1])
+        sys_param_values.append( { name:sys_param_values_dict[name][i] for name in list(true_hypersurface.params.keys()) } )
+        hist = true_hypersurface.evaluate(sys_param_values[-1])
         sys_maps.append( Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist)) )
 
 
     #
-    # Fit hyperplanes
+    # Fit hypersurfaces
     #
 
     # Perform fit
-    hyperplane.fit(
+    hypersurface.fit(
         nominal_map=nom_map,
         nominal_param_values=nom_param_values,
         sys_maps=sys_maps,
@@ -1318,15 +1347,15 @@ if __name__ == "__main__" :
     )
 
     # Report the results
-    print("\nFitted hyperplane report:")
-    hyperplane.report()
+    print("\nFitted hypersurface report:")
+    hypersurface.report()
 
     # Check the fitted parameter values match the truth
-    # This only works if `norm=False` in the `hyperplane.fit` call just above
+    # This only works if `norm=False` in the `hypersurface.fit` call just above
     print("\nChecking fit recovered truth...")
-    assert np.allclose( hyperplane.intercept, true_hyperplane.intercept )
-    for param_name in hyperplane.param_names :
-        assert np.allclose( hyperplane.params[param_name].fit_coeffts, true_hyperplane.params[param_name].fit_coeffts )
+    assert np.allclose( hypersurface.intercept, true_hypersurface.intercept )
+    for param_name in hypersurface.param_names :
+        assert np.allclose( hypersurface.params[param_name].fit_coeffts, true_hypersurface.params[param_name].fit_coeffts )
     print("... fit was successful!\n")
 
 
@@ -1335,17 +1364,17 @@ if __name__ == "__main__" :
     #
 
     # Save
-    file_path = "hyperplane.json.bz2"
-    to_json(hyperplane,file_path)
+    file_path = "hypersurface.json.bz2"
+    to_json(hypersurface,file_path)
 
     # Re-load
-    reloaded_hyperplane = Hyperplane.from_state(file_path)
+    reloaded_hypersurface = Hypersurface.from_state(file_path)
 
     # Test
     #TODO
 
     # Done
-    hyperplane = reloaded_hyperplane
+    hypersurface = reloaded_hypersurface
 
 
     #
@@ -1355,19 +1384,19 @@ if __name__ == "__main__" :
     import matplotlib.pyplot as plt
 
     # Create the figure
-    fig,ax = plt.subplots(1,len(hyperplane.params))
+    fig,ax = plt.subplots(1,len(hypersurface.params))
 
     # Choose an arbitrary bin for plotting
-    bin_idx = tuple([ 0 for i in range(hyperplane.binning.num_dims) ])
+    bin_idx = tuple([ 0 for i in range(hypersurface.binning.num_dims) ])
 
     # Plot each param
-    for i,param in enumerate(hyperplane.params.values()) :
+    for i,param in enumerate(hypersurface.params.values()) :
 
-        plot_ax = ax if len(hyperplane.params) == 1 else ax[i]
+        plot_ax = ax if len(hypersurface.params) == 1 else ax[i]
 
         plot_bin_fits(
             ax=plot_ax,
-            hyperplane=hyperplane,
+            hypersurface=hypersurface,
             bin_idx=bin_idx,
             param_name=param.name,
             show_nominal=True,
@@ -1378,7 +1407,7 @@ if __name__ == "__main__" :
 
 
     # Save
-    fig_file_path = "hyperplane_1d.pdf"
+    fig_file_path = "hypersurface_1d.pdf"
     fig.savefig(fig_file_path)
     print("Figure saved : %s" % fig_file_path)
 
@@ -1387,7 +1416,7 @@ if __name__ == "__main__" :
     # 2D plot
     #
 
-    if len(hyperplane.params) > 1 :
+    if len(hypersurface.params) > 1 :
 
         from mpl_toolkits.mplot3d import Axes3D
 
@@ -1398,7 +1427,7 @@ if __name__ == "__main__" :
         # Plot
         plot_bin_fits_2d(
             ax=ax,
-            hyperplane=hyperplane,
+            hypersurface=hypersurface,
             bin_idx=bin_idx,
             param_names=["foo","bar"],
         )
@@ -1409,7 +1438,7 @@ if __name__ == "__main__" :
         fig.tight_layout()
 
         # Save
-        fig_file_path = "hyperplane_2d.pdf"
+        fig_file_path = "hypersurface_2d.pdf"
         fig.savefig(fig_file_path)
         print("Figure saved : %s" % fig_file_path)
 

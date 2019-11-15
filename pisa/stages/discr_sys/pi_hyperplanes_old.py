@@ -17,7 +17,7 @@ from pisa.utils.log import logging
 from pisa.utils.numba_tools import WHERE
 from pisa.utils import vectorizer
 
-__all__ = ["pi_hyperplanes", "SIGNATURE", "eval_hyperplane"]
+__all__ = ["pi_hyperplanes_old", "SIGNATURE", "eval_hyperplane"]
 
 __author__ = "P. Eller, T. Ehrhardt, T. Stuttard, J.L. Lanfranchi"
 
@@ -37,7 +37,7 @@ __license__ = """Copyright (c) 2014-2018, The IceCube Collaboration
 
 
 # TODO: consider taking into account fit parameter covariances
-class pi_hyperplanes(PiStage):  # pyint: disable=invalid-name
+class pi_hyperplanes_old(PiStage):  # pyint: disable=invalid-name
     """
     Service to apply hyperplane parameterisation produced by
     `scripts.fit_discrete_sys_nd`
@@ -238,7 +238,7 @@ class pi_hyperplanes(PiStage):  # pyint: disable=invalid-name
 
         self.links = ast.literal_eval(links)
 
-        # -- Add attrs to `self` specific to `pi_hyperplanes` -- #
+        # -- Add attrs to `self` specific to `pi_hyperplanes_old` -- #
 
         self.fit_results_file = fit_results_file
         """str : path to hyperplane fit results file"""
