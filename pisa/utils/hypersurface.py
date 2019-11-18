@@ -1,3 +1,29 @@
+"""
+Tools for working with hypersurfaces, which are continuous functions in N-D 
+with arbitrary functional forms. 
+
+Hypersurfaces can be used to model systematic uncertainties derived from discrete 
+simulation datasets, for example for detedctor uncertainties.
+"""
+
+
+__all__ = ['get_num_args', 'Hypersurface', 'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces', 'plot_bin_fits', 'plot_bin_fits_2d']
+
+__author__ = 'T. Stuttard'
+
+__license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.'''
 
 
 import os, sys, collections, copy, inspect
@@ -1152,6 +1178,7 @@ class HypersurfaceParam(object) :
             self._serializable_state = state
 
         return self._serializable_state 
+
 
 
 '''
