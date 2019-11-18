@@ -95,8 +95,7 @@ Hypersurface functional forms
      - 
 '''
 
-
-#TODO support uncertainty propagation (difficult because `uncertainties` modules not compatible with numba
+#TODO support uncertainty propagation (difficult because `uncertainties` modules not compatible with numba)
 
 def linear_hypersurface_hypersurface_func(p,m,out) :
     '''

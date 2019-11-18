@@ -2,6 +2,14 @@
 PISA pi stage to apply hypersurface fits from discrete systematics parameterizations
 """
 
+#TODO Currently have to defined the `links` value in the stage config to match what the `combine_regex` does in 
+#     the Hypersurface fitting. The `combine_regex` is stored in the hypersurface instance, so should make the 
+#     scontainer linking use this instead of having to manually specify links. To do this, should make a variant 
+#     of the container linking function that accepts a regex (using shared code with Map.py).
+
+#TODO Store hypersurface uncertainty and propagate this
+
+
 from __future__ import absolute_import, print_function, division
 
 import ast
@@ -38,7 +46,6 @@ __license__ = """Copyright (c) 2014-2018, The IceCube Collaboration
  limitations under the License."""
 
 
-# TODO: consider taking into account fit parameter covariances
 class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
     """
     Service to apply hypersurface parameterisation produced by
@@ -51,13 +58,8 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         `pisa.scripts.fit_discrete_sys_nd.py` script
 
     params : ParamSet
-        Note that the params required to be in `params` are found from
-        those listed in the `fit_results_file`
-
-    Notes
-    -----
-    TODO
-
+        Note that the params required to be in `params` are determined from
+        those listed in the `fit_results_file`.
     """
 
     def __init__(
@@ -74,17 +76,6 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         output_specs=None,
         links=None,
     ):
-        # -- Read fit_results_file and extract necessary info -- #
-
-        # Store args
-        self.fit_results_file = fit_results_file
-
-        # Load hypersurfaces
-        self.hypersurfaces = load_hypersurfaces(self.fit_results_file)
-
-        # Get the expected param names
-         #TODO change name from `fit` params
-        self.hypersurface_param_names = list(self.hypersurfaces.values())[0].param_names
 
         # -- Expected input / output names -- #
         input_names = ()
@@ -101,6 +92,18 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         else:
             output_apply_keys = ("weights",)
             input_apply_keys = output_apply_keys
+
+        # -- Load hypersurfaces -- #
+
+        # Store args
+        self.fit_results_file = fit_results_file
+
+        # Load hypersurfaces
+        self.hypersurfaces = load_hypersurfaces(self.fit_results_file)
+
+        # Get the expected param names
+        # These are used as the expected param names for the stage
+        self.hypersurface_param_names = list(self.hypersurfaces.values())[0].param_names
 
         # -- Initialize base class -- #
 
@@ -127,7 +130,7 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         assert self.calc_mode == "binned"
         assert self.output_mode is not None
 
-        self.links = ast.literal_eval(links) #TODO directly use compile_regex from hypersurface?
+        self.links = ast.literal_eval(links)
 
 
     def setup_function(self):
@@ -135,7 +138,7 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
 
         self.data.data_specs = self.calc_specs
 
-        if self.links is not None: #TODO use stored compare_regex
+        if self.links is not None:
             for key, val in self.links.items():
                 self.data.link_containers(key, val)
 
@@ -144,18 +147,15 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
             container["hypersurface_scalefactors"] = np.empty(container.size, dtype=FTYPE)
 
         # Check binning compatibility
-        #TODO binning hash
+        for key, hypersurface in self.hypersurfaces.items() : 
+            assert self.data.data_specs.hash == hypersurface.binning.hash, "Hypersurface binning does not match binning of data"
 
-        # Check params match
-        #TODO
-
-        # Check map names match
-        #TODO
-
-        # Check nominal values match between the stage params and the hypersurface params
-        #TODO
+        # Check map names match between data container and hypersurfaces
+        for container in self.data:
+            assert container.name in self.hypersurfaces, "No match for map %s found in the hypersurfaces" % (container.name)
 
         self.data.unlink_containers()
+
 
     def compute_function(self):
 
@@ -166,27 +166,23 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
             for key, val in self.links.items():
                 self.data.link_containers(key, val)
 
-        # Format the params dict
-        #TODO handle units
-        # param_values = { sys_param_name: self.params[sys_param_name].m_as(units) for sys_param_name, units in zip(self.hypersurface_param_names, self.fit_param_units) } #TODO change name from fit params
+        # Format the params dict that will be passed to `Hypersurface.evaluate`
+        #TODO checks on param units
         param_values = { sys_param_name: self.params[sys_param_name].m for sys_param_name in self.hypersurface_param_names }
 
         # Evaluate the hypersurfaces
         for container in self.data:
 
-            # Get the hypersurface scale factors
-            # Reshape to 1D array
+            # Get the hypersurface scale factors (reshape to 1D array)
             scalefactors = self.hypersurfaces[container.name].evaluate(param_values).reshape(container.size)
 
             # Where there are no scalefactors (e.g. empty bins), set scale factor to 1 
-            #TODO maybe this should be handle by Hyperplane.evaluate directly??
+            #TODO maybe this should be handle by Hypersurface.evaluate directly??
             scalefactors[~np.isfinite(scalefactors)] = 1.
             
             # Add to container
-            #TODO Directly modify the container in the first place
             np.copyto( src=scalefactors, dst=container["hypersurface_scalefactors"].get(WHERE) )
             container["hypersurface_scalefactors"].mark_changed()
-            #TODO verctorise, get(WHERE), mark_changed, etc
 
         # Unlink the containers again
         self.data.unlink_containers()
@@ -201,13 +197,13 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
                 container["hypersurface_scalefactors"], container["weights"]
             )
 
+            # Also update uncertainty
             if self.error_method == "sumw2":
                 vectorizer.multiply(
                     container["hypersurface_scalefactors"], container["errors"]
                 )
 
             # Correct negative event counts that can be introduced by hypersurfaces (due to intercept)
-            #TODO probably can make this more efficient
             weights = container["weights"].get(WHERE)
             neg_mask = weights < 0.
             if neg_mask.sum() > 0 :
