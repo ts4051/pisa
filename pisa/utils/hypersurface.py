@@ -1,3 +1,5 @@
+
+
 import os, sys, collections, copy, inspect
 
 import numpy as np
@@ -25,7 +27,13 @@ Helper functions
 def get_num_args(func) :
     '''
     Function for grabbing the number of arguments to a function
-    Handles (1) stand apythin functions, (2) numpy unfuncs
+
+    Parameters
+    ----------
+    func : function
+        Function to determine args for. 
+        Can be a standard pythin function or a numpy ufunc
+
     '''
 
     #TODO numba funcs
@@ -38,21 +46,47 @@ def get_num_args(func) :
 
 '''
 Hypersurface functional forms
+
+   Define functional forms for HypersurfaceParam instances here.
+
+   Functions defined here MUST:
+     - Be named <something>_hypersurface_hypersurface_func (they are then chosen by the user using `func_name=<something>`).
+     - Support numba guvectorization.
+     - Function arguments must observed this convention: 
+         `p`, `<coefficient 0>`, ..., `<coefficient N>`, `out`
+         where `p` is the systematic parameter, `out is the array to write the results to, and there 
+         are N coefficients of the parameterisation.
+
+   The format of these arguments depends on the use case, of which there are two:
+     - When fitting the function coefficients. This is done bin-wise using multiple datasets.
+       - Params are then: `p` is array (one value per dataset), coefficients and `out` 
+         are scalar (representing a single bin).
+     - Evaluating a fitted hypersurface. This is done for all bins simultaneously, using a single value for p.
+       - Params are then: `p` is scalar (current value of systematic parameter, coefficients and `out` are arrays
+         representing the hypersurfaces of all bins per bin.
+ 
+   The argument definitions are then:
+     - 
 '''
 
-#TODO support uncertainty propagation
 
-def linear_hypersurface_func(p,m,out) :
+#TODO support uncertainty propagation (difficult because `uncertainties` modules not compatible with numba
+
+def linear_hypersurface_hypersurface_func(p,m,out) :
     '''
     Linear hypersurface functional form
+
+    f(p) = m * p
     '''
     result = m * p
     np.copyto(src=result,dst=out)
 
 
-def exponential_hypersurface_func(p,a,b,out) :
+def exponential_hypersurface_hypersurface_func(p,a,b,out) :
     '''
     Exponential hypersurface functional form
+
+    f(p) = a * exp(b*p)
     '''
     result = a * np.exp(b*p)
     np.copyto(src=result,dst=out)
@@ -68,16 +102,53 @@ class Hypersurface(object) :
     A class defining the hypersurface
 
     Contains :
-      - The common intercept
-      - Each systematic parameter, inside which the functional form is defined
+      - A single common intercept
+      - N systematic parameters, inside which the functional form is defined
+
+    This class can be configured to hold both the functional form of the hypersurface 
+    and values (likely fitted from simulation datasets) for the free parameters of this 
+    functional form.
+
+    Fitting functionality is provided to fit these free parameters.
+
+    This class can simultaneously hold hypersurfaces for every bin in a histogram (Map).
+
+    The functional form of the systematic parameters can be arbitrarily complex.
 
     The class has a fit method for fitting the hypersurface to some data (e.g. 
-    discrete systematics sets)
+    discrete systematics sets).
 
-    I imagine :
-      - Having one instance of this per bin, per type (e.g. nue_cc, nu_nc, etc)
-      - Storing this to a file (somehow, either pickle, or json the function stored as a str)
-      - Loading the hyperplans from a file in the PISA stage and calling the same `evaluate` method (possibly with some numba-fication)
+    Serialization functionality is included to allow fitted hypersurfaces to be stored 
+    to a file and re-loaded later (e.g. to be used in analysis).
+
+    The main use cases are:
+        1) Fit hypersurfaces
+             - Define the desired HypersurfaceParams (functional form, intial coefficient guesses).
+             - Instantiate the `Hypersurface` class, providing the hypersurface params and initial intercept guess.
+             - Use `Hypersurface.fit` function (or more likely the `fit_hypersurfaces` helper function provided below),
+               to fit the hypersurface coefficients to some provided datasets.
+             - Store to file
+        2) Evaluate an existing hypersurface
+             - Load existing fitted Hypersurface from a file (`load_hypersurfaces` helper function)
+             - Get the resulting hypersurface value for each bin for a given set of systemaic param 
+               values using the `Hypersurface.evaluate` method.
+             - Use the hypersurface value for each bin to re-weight events
+
+    The class stores information about the datasets used to fit the hypersurfaces, including the Maps 
+    used and nominal and systematic parameter values.
+
+    Parameters
+    ----------
+    params : list
+        A list of HypersurfaceParam instances defining the hypersurface.
+        The `initial_fit_coeffts` values in this instances will be used as the starting 
+        point for any fits.
+
+    initial_intercept : float
+        Starting point for the hypersurface intercept in any fits
+
+    debug : bool
+        True -> significantly more print out
     '''
 
     def __init__(self,params,initial_intercept=None,debug=False) :
@@ -107,9 +178,11 @@ class Hypersurface(object) :
         self._serializable_state = None
 
 
-    def _init(self,binning,nominal_param_values) :
+    def _init(self, binning, nominal_param_values ) :
         '''
-        Actually initialise the hypersurface
+        Actually initialise the hypersurface.
+
+        Internal function, not to be called by a user.
         '''
 
         #
@@ -128,7 +201,7 @@ class Hypersurface(object) :
         self.intercept = np.full(self.binning.shape,self.initial_intercept,dtype=FTYPE)
         self.intercept_sigma = np.full_like(self.intercept,np.NaN)
         for param in list(self.params.values()) :
-            param.init_fit_coefft_arrays(self.binning)
+            param._init_fit_coefft_arrays(self.binning)
 
 
         #
@@ -150,13 +223,29 @@ class Hypersurface(object) :
 
     @property
     def param_names(self) :
+        '''
+        Return the (ordered) names of the systematic parameters
+        '''
         return list(self.params.keys())
 
 
-    def evaluate(self,param_values,bin_idx=None) :
+    def evaluate(self, param_values, bin_idx=None) :
         '''
-        Evaluate the hypersurface, using the systematic parameter values provided
-        Uses the current internal values for all functional form parameters
+        Evaluate the hypersurface, using the systematic parameter values provided.
+        Uses the current internal values for all functional form coefficients.
+
+        Parameters
+        ----------
+        param_values : dict
+            A dict specifying the values of the systematic parameters to use in the evaluation.
+            Format is :
+                { sys_param_name_0 : sys_param_0_val, ..., sys_param_name_N : sys_param_N_val }.
+                The keys must be string and correspond to the HypersurfaceParam instances.
+                The values must be scalars.
+
+        bin_idx : tuple or None
+            Optionally can specify a particular bin (using numpy indexing). d
+            Othewise will evaluate all bins.
         '''
 
         assert self._initialized
@@ -222,41 +311,79 @@ class Hypersurface(object) :
         return out
 
 
-    @property
-    def nominal_values(self) :
-        return collections.OrderedDict([ (name,param.nominal_value) for name,param in list(self.params.items()) ])
 
-    @property
-    def fit_param_values(self) :
-        return collections.OrderedDict([ (name,param.fit_param_values) for name,param in list(self.params.items()) ])
-
-    @property
-    def num_fit_sets(self) :
-        return list(self.params.values())[0].num_fit_sets
-
-
-    def fit(self,nominal_map,nominal_param_values,sys_maps,sys_param_values,norm=True,method=None,smooth=False,smooth_kw=None) :
+    def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method=None, smooth=False, smooth_kw=None ) :
         '''
-        Fit the function/shape parameters 
-        Writes the results directly into this data structure
+        Fit the hypersurface coefficients (in every bin) to best match the provided nominal
+        and systematic datasets.
+
+        Writes the results directly into this data structure.
+
+        Parameters
+        ----------
+        nominal_map : Map
+            Map from the nominal dataset
+
+        nominal_param_values : dict
+            Value of each systematic param used to generate the nominal dataset
+            Format: { param_0_name : param_0_nom_val, ..., param_N_name : param_N_nom_val }
+
+        sys_maps : list of Maps
+            List containing the Map from each systematic dataset
+
+        sys_param_values : list of dicts
+            List where each element if a dict containing the values of each systematic param used to generate the that dataset
+            Each list element specified the parameters for the corresponding element in `sys_maps`
+
+        norm : bool
+            Normalise the maps to the nominal map.
+            This is what you want to do when using the hypersurface to re-weight simulation (which is the main use case).
+            In principal the hypersurfaces are more general though and could be used for other tasks too, hence this option.
+
+        method : str
+            `method` arg to pass to `scipy.optimize.curve_fit`
+
+        smooth : str
+            Smoothing method to use. Choose `None` if do not want smoothing.
+            Smoothing methods supported:
+                - `gaussian_filter`
+
+        smooth_kw : dict
+            kwargs to pass to smoothing method underlying function
+            Format depends on smoothing method:
+              `gaussian_filter`
+                 kwargs for `scipy.ndimage.filters.gaussian_filter`
+                 MUST include `sigma`, `order`
         '''
+
+        #TODO Add option to exclude bins with too few stats from the fit, leving null hypersurface for them.
+        #     This is to avoid issues with bins with tiny stats having crazy gradients from statistical 
+        #     fluctuations (if there are very few events in that bin for that speciesi then that bin shouldn't
+        #     be significant in the fit).
+
 
         #
         # Check inputs
         #
 
-        # Check all maps
-        #TODO
+        # Check nominal dataset definition
+        assert isinstance(nominal_map, Map)
+        assert isinstance(nominal_param_values, collections.Mapping)
+        assert set(nominal_param_values.keys()) == set(self.param_names)
+        assert all([ isinstance(k, str) for k in nominal_param_values.keys() ])
+        assert all([ np.isscalar(v) for v in nominal_param_values.values() ])
 
-        # Check the systematic parameter values
-        #TODO
-        # assert isinstance(param_values,collections.Mapping)
-        # assert set(param_values.keys()) == set(self.param_names), "`param_values` keys do not match the hypersurface's systematic params"
-        # num_datasets = len(param_values.values()[0])
-        # assert np.all(np.array([ len(x) for x in param_values.values()]) == num_datasets), "Each systematic parameter must have one value per dataset"
-
-        # Check the maps
-        #TODO number, binning, ...
+        # Check systematic dataset definitions
+        assert isinstance(sys_maps, collections.Sequence)
+        assert isinstance(sys_param_values, collections.Sequence)
+        assert len(sys_maps) == len(sys_param_values)
+        for sys_map, sys_param_vals in zip(sys_maps, sys_param_values) :
+            assert isinstance(sys_map, Map)
+            assert isinstance(sys_param_vals, collections.Mapping)
+            assert set(sys_param_vals.keys()) == set(self.param_names)
+            assert all([ isinstance(k, str) for k in sys_param_vals.keys() ])
+            assert all([ np.isscalar(v) for v in sys_param_vals.values() ])
+            assert sys_map.binning == nominal_map.binning
 
 
         #
@@ -270,7 +397,7 @@ class Hypersurface(object) :
             self.fit_method = "lm"  # lm, trf, dogbox
 
         # Initialise hypersurface using nominal dataset
-        self._init(binning=nominal_map.binning,nominal_param_values=nominal_param_values)
+        self._init(binning=nominal_map.binning, nominal_param_values=nominal_param_values)
 
         # Combine nominal and sys sets
         maps = [nominal_map] + sys_maps
@@ -297,6 +424,9 @@ class Hypersurface(object) :
         #
         # Smoothing
         #
+
+        #TODO Factor out smoothing functions so can use them in other places too
+        #TODO Add handling for user to provide their own smoothing function
 
         # Optionally can apply smoothing to histograms before the fit
         # Can be useful for poorlt populated templates
@@ -374,8 +504,6 @@ class Hypersurface(object) :
 
             # Format the fit `y` values : [ bin value 0, bin_value 1, ... ]
             # Also get the corresonding uncertainty
-            #TODO Getting different y_sigma w.r.t. the old script, needs investigating (maybe something ro do with how the maps are normalised...)
-            #TODO ALso slight difference in x/y values, but much smaller difference. Maybe use of FTYPE?
             y = np.asarray([ m.nominal_values[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
             y_sigma = np.asarray([ m.std_devs[bin_idx] for m in self.fit_maps ], dtype=FTYPE)
 
@@ -383,7 +511,6 @@ class Hypersurface(object) :
             # May remove some points before fitting if find issues
             scan_point_mask = np.ones( y.shape, dtype=bool) 
 
-            #TODO Handle cases where have as value of 0 in an element of y, and thus a sigma of 0 too. Some of the fit methods choke on the sigma=0 case. 
             # Cases where we have a y_sigma element = 0 (normally because the corresponding y element = 0) screw up the fits (least squares divides by sigma, so get infs)
             # Need to handle these cases here
             # For now, I assing an new non-zero sigma value instead
@@ -391,8 +518,7 @@ class Hypersurface(object) :
             #TODO Look into a good solution to this in more detail
             bad_sigma_mask = y_sigma == 0.
             if bad_sigma_mask.sum() > 0 :
-                y_sigma[bad_sigma_mask] = 1. #TODO What is a good number to use?
-                # scan_point_mask = scan_point_mask & (~bad_sigma_mask)
+                y_sigma[bad_sigma_mask] = 1.
 
             # Apply the mask to get the values I will actually use
             x_to_use = np.array([ xx[scan_point_mask] for xx in x ])
@@ -402,17 +528,6 @@ class Hypersurface(object) :
             # Checks
             assert x_to_use.shape[0] == len(self.params)
             assert x_to_use.shape[1] == y_to_use.size
-
-            # #TODO REMOVE
-            # #TODO REMOVE
-            # #TODO REMOVE
-            # from uncertainties import unumpy as unp
-            # y_old = np.asarray([m.hist[bin_idx] for m in self.fit_maps])
-            # y_values_old = unp.nominal_values(y_old)
-            # y_sigma_old = unp.std_devs(y_old)
-            # #TODO REMOVE
-            # #TODO REMOVE
-            # #TODO REMOVE
 
             # Get flat list of the fit param guesses
             p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in list(self.params.values()) for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
@@ -474,7 +589,7 @@ class Hypersurface(object) :
                 # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
                 eps = np.finfo(FTYPE).eps
  
-                #TODO REMOVE
+                # Debug logging
                 if self.debug :
                     test_bin_idx = (0,0,0) 
                     if bin_idx == test_bin_idx :
@@ -492,12 +607,6 @@ class Hypersurface(object) :
                 if self.fit_method == "lm" :
                     curve_fit_kw["epsfcn"] = eps
 
-                # print ">>>>>>>>>>>>>>"
-                # for i in range(len(x)) :
-                #     print "x[%i]   : %s" % (i,x_to_use[i])
-                # print "y       : %s" % y_to_use
-                # print "y sigma : %s" % y_sigma_to_use
-
                 # Perform fit
                 #TODO rescale all params to [0,1] as we do for minimizers?
                 popt, pcov = curve_fit(
@@ -511,12 +620,6 @@ class Hypersurface(object) :
                     method=self.fit_method,
                     **curve_fit_kw
                 )
-
-                # if bin_idx == (0,0,0) :
-                #     print(">>>>>>>>>>>>>>>>>>>>>>>")
-                #     print("Curve fit outputs :")
-                #     print("  popt       : %s" % popt)
-                #     print("<<<<<<<<<<<<<<<<<<<<<<<")
 
                 # Check the fit was successful
                 #TODO curve_fit doesn't return anything that use here, so need another method. Check on chi2 could work...
@@ -585,7 +688,35 @@ class Hypersurface(object) :
 
 
 
+    @property
+    def nominal_values(self) :
+        '''
+        Return the stored nominal parameter for each dataset
+        Returns: { param_0_name : param_0_nom_val, ..., param_N_name : param_N_nom_val }
+        '''
+        return collections.OrderedDict([ (name,param.nominal_value) for name,param in list(self.params.items()) ])
+
+    @property
+    def fit_param_values(self) :
+        '''
+        Return the stored systematic parameters from the datasets used for fitting
+        Returns: { param_0_name : [ param_0_sys_val_0, ..., param_0_sys_val_M ], ..., param_N_name : [ param_N_sys_val_0, ..., param_N_sys_val_M ] }
+        '''
+        return collections.OrderedDict([ (name,param.fit_param_values) for name,param in list(self.params.items()) ])
+
+
+    @property
+    def num_fit_sets(self) :
+        '''
+        Return number of datasets used for fitting
+        '''
+        return list(self.params.values())[0].num_fit_sets
+
+
     def get_nominal_mask(self) :
+        '''
+        Return a mask indicating which datasets have nominal values for all parameters
+        '''
 
         nom_mask = np.ones((self.num_fit_sets,),dtype=bool)
 
@@ -595,9 +726,17 @@ class Hypersurface(object) :
         return nom_mask
 
 
-    def get_on_axis_mask(self,param_name) :
+    def get_on_axis_mask(self, param_name) :
         '''
-        TODO
+        Return a mask indicating which datasets are "on-axis" for a given parameter.
+
+        "On-axis" means "generated using the nominal value for this parameter". Parameters other 
+        than the one specified can have non-nominal values.
+
+        Parameters
+        ----------
+        param_name : str
+            The name of systematic parameter for which we want on-axis datasets
         '''
 
         assert param_name in self.param_names
@@ -618,36 +757,55 @@ class Hypersurface(object) :
 
     def report(self,bin_idx=None) :
         '''
-        String version of the hypersurface contents
+        Return a string version of the hypersurface contents
+
+        Parameters
+        ----------
+        bin_idx : tupel of None
+            Specify a particular bin (using numpy indexing). In this case only report on that bin. 
         '''
 
+        msg = ""
+
         # Fit results
-        print(">>>>>> Fit coefficients >>>>>>")
+        msg += ">>>>>> Fit coefficients >>>>>>" + "\n"
         bin_indices = np.ndindex(self.binning.shape) if bin_idx is None else [bin_idx]
         for bin_idx in bin_indices :
-            print("  Bin %s :" % (bin_idx,) )
-            print("     Intercept : %0.3g" % (self.intercept[bin_idx],) )
+            msg += "  Bin %s :" % (bin_idx,)  + "\n"
+            msg += "     Intercept : %0.3g" % (self.intercept[bin_idx],)  + "\n"
             for param in list(self.params.values()) :
-                print("     %s : %s" % ( param.name, ", ".join([ "%0.3g"%param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=cft_idx) for cft_idx in range(param.num_fit_coeffts) ])) )
-        print("<<<<<< Fit coefficients <<<<<<")
+                msg += "     %s : %s" % ( param.name, ", ".join([ "%0.3g"%param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=cft_idx) for cft_idx in range(param.num_fit_coeffts) ]))  + "\n"
+        msg += "<<<<<< Fit coefficients <<<<<<" + "\n"
 
+        return msg
+
+
+    def __str__(self) :
+        return self.report()
 
 
     @property
     def fit_maps(self) :
+        '''
+        Return the `Map instances used for fitting
+        These will be normalised if the fit was performend to normalised maps.
+        '''
         # assert self.fit_complete
         return self.fit_maps_raw if self.fit_maps_norm is None else self.fit_maps_norm
 
 
     @property
     def num_fit_sets(self) :
+        '''
+        Return number of datasets used for fitting
+        '''
         return len(list(self.fit_param_values.values())[0])
 
 
     @property
     def num_fit_coeffts(self) :
         '''
-        Return the total number of coefficients to fit
+        Return the total number of coefficients in the hypersurface fit
         This is the overall intercept, plus the coefficients for each individual param
         '''
         return int( 1 + np.sum([ param.num_fit_coeffts for param in list(self.params.values()) ]) )
@@ -679,7 +837,9 @@ class Hypersurface(object) :
 
     @property
     def serializable_state(self):
-        """OrderedDict containing savable state attributes"""
+        """
+        OrderedDict containing savable state attributes
+        """
 
         if self._serializable_state is None: #TODO always redo?
 
@@ -708,11 +868,14 @@ class Hypersurface(object) :
 
     @classmethod
     def from_state(cls, state):
-        """Instantiate a new object from the contents of a serialized state dict
+        """
+        Instantiate a new object from the contents of a serialized state dict
+
         Parameters
         ----------
         resource : dict
             A dict
+
         See Also
         --------
         to_json
@@ -783,30 +946,33 @@ class Hypersurface(object) :
         return hypersurface
 
 
-    def smooth(self,method="gauss") :
-        '''
-        Apply smoothing between bins for hypersurface coefficients
-        '''
-
-        pass #TODO implement
-
-        #TODO see work done for Upgrade oscillations analsis along these lines
-
-        # # Smooth the params across neighbouring bins
-        # if smooth == 'gauss':
-        #     hypersurfaces["hypersurfaces"][map_name]["fit_params_smooth"] = np.full_like(hypersurfaces["hypersurfaces"][map_name]["fit_params"],np.NaN) 
-        #     for i_fit_param in range(num_params) :
-        #         finite_mask = np.isfinite(hypersurfaces["hypersurfaces"][map_name]["fit_params"][...,i_fit_param])
-        #         hypersurfaces["hypersurfaces"][map_name]["fit_params_smooth"][...,i_fit_param][finite_mask] = gaussian_filter(hypersurfaces["hypersurfaces"][map_name]["fit_params"][...,i_fit_param][finite_mask],sigma=1.)
-
-
 class HypersurfaceParam(object) :
     '''
-    A class defining the systematic parameter in the hypersurface
-    User constructs this by passing the functional form (as a function)
+    A class representing one of the parameters (and corresponding functional forms) in the hypersurface.
+
+    A user creates the initial instances of thse params, before passing the to the Hypersurface instance.
+    Once this has happened, the user typically does not need to directly interact woth these 
+    HypersurfaceParam instances.
+
+    Parameters
+    ----------
+    name : str
+        Name of the parameter
+
+    func_name : str
+        Name of the hypersurface function to use.
+        See "Hypersurface functional forms" section for more details, including available functions.
+        Reminder: Functions must be named, `<something>_hypersurface_hypersurface_func`, and then `func_name=<something>`.
+        Note that a global search for functions named `<something>_hypersurface_hypersurface_func` is performed, so the 
+        user can define new functions externally to this file.
+
+    initial_fit_coeffts : array
+        Initial values for the coefficients of the functional form
+        Number and meaning of coefficients depends on functional form
     '''
 
-    def __init__(self,name,func_name,initial_fit_coeffts=None) :
+
+    def __init__(self, name, func_name, initial_fit_coeffts=None ) :
 
         # Store basic members
         self.name = name
@@ -833,15 +999,15 @@ class HypersurfaceParam(object) :
 
         # Get the function
         self.__name__ = func_name
-        self._func = self.get_func(self.__name__)
+        self._hypersurface_func = self._get_hypersurface_hypersurface_func(self.__name__)
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
-        #TODO Does this support the GPU case?
-        self.num_fit_coeffts = get_num_args(self._func) - 2
+        #TODO Not testwd for GPus
+        self.num_fit_coeffts = get_num_args(self._hypersurface_func) - 2
 
         # Check and init the fit param initial values
-        #TODO Add support for per bin values?
+        #TODO Add support for "per bin" initial values
         if initial_fit_coeffts is None :
             # No values provided, use 0 for all
             self.initial_fit_coeffts = np.zeros(self.num_fit_coeffts,dtype=FTYPE)
@@ -851,31 +1017,38 @@ class HypersurfaceParam(object) :
             assert self.initial_fit_coeffts.size == self.num_fit_coeffts, "'initial_fit_coeffts' should have %i values, found %i" % (self.num_fit_coeffts,self.initial_fit_coeffts.size)
 
 
-    def get_func(self,func_name) :
+    def _get_hypersurface_hypersurface_func(self,func_name) :
         '''
         Find the function defining the hypersurface functional form.
 
-        User specifies this by it's string name, which must correspond to one 
-        of the pre-defined functions.
+        User specifies this by it's string name, which must correspond to a pre-defined 
+        function with the name `<func_name>_hypersurface_hypersurface_func`.
+
+        Note that a global search for functions named `<something>_hypersurface_hypersurface_func` is 
+        performed, so the user can define new functions externally to this file.
+
+        Internal function, not to be called by a user.
         '''
 
         assert isinstance(func_name,str), "'func_name' must be a string"
 
         # Form the expected function name
-        hypersurface_func_suffix = "_hypersurface_func"
-        fullfunc_name = func_name + hypersurface_func_suffix
+        hypersurface_hypersurface_func_suffix = "_hypersurface_hypersurface_func"
+        fullfunc_name = func_name + hypersurface_hypersurface_func_suffix
 
         # Find all functions
-        all_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_func_suffix) }
-        assert fullfunc_name in all_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_func_suffix)[0] for f in all_hypersurface_functions])
-        return all_hypersurface_functions[fullfunc_name]
+        all_hypersurface_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_hypersurface_func_suffix) }
+        assert fullfunc_name in all_hypersurface_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_hypersurface_func_suffix)[0] for f in all_hypersurface_hypersurface_functions])
+        return all_hypersurface_hypersurface_functions[fullfunc_name]
 
 
-    def init_fit_coefft_arrays(self,binning) :
+    def _init_fit_coefft_arrays(self,binning) :
         '''
         Create the arrays for storing the fit parameters
         Have one fit per bin, for each parameter
         The shape of the `self.fit_coeffts` arrays is: (binning shape ..., num fit params )
+
+        Internal function, not to be called by a user.
         '''
 
         arrays = []
@@ -894,7 +1067,8 @@ class HypersurfaceParam(object) :
     def evaluate(self,param,out,bin_idx=None) :
         '''
         Evaluate the functional form for the given `param` values.
-        Uses the current values of the fit parameters.
+        Uses the current values of the fit coefficients.
+
         By default evaluates all bins, but optionally can specify a particular bin (used when fitting).
         '''
 
@@ -913,7 +1087,7 @@ class HypersurfaceParam(object) :
         args += [this_out]
 
         # Call the function
-        self._func(*args)
+        self._hypersurface_func(*args)
 
         # Add to overall hypersurface result
         out += this_out
@@ -923,8 +1097,9 @@ class HypersurfaceParam(object) :
         '''
         Indexing the fit_coefft matrix is a bit of a pain
         This helper function eases things
-        TODO can probably do this more cleverly with numpy indexing, but works for now...
         '''
+
+        # TODO can probably do this more cleverly with numpy indexing, but works for now...
 
         # Indexing based on the bin
         if (bin_idx is Ellipsis) or (bin_idx is None) :
@@ -956,7 +1131,9 @@ class HypersurfaceParam(object) :
 
     @property
     def serializable_state(self):
-        """OrderedDict containing savable state attributes"""
+        """
+        OrderedDict containing savable state attributes
+        """
 
         if self._serializable_state is None: #TODO always redo?
 
@@ -978,15 +1155,62 @@ class HypersurfaceParam(object) :
 
 
 '''
-Hypersurface fitting and loading
+Hypersurface fitting and loading helper functions
 '''
 
-def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None, **kw) :
+def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None, **hypersurface_fit_kw) :
     '''
-    Function for fitting hypersurfaces to simulation dataset
+    A helper function that a user can use to fit hypersurfaces to a bunch of simulation datasets,
+    and save the results to a file. Basically a wrapper of Hypersurface.fit, handling common pre-fitting tasks
+    like producing mapsets from piplelines, merging maps from similar specifies, etc.
+
+    Note that this supports fitting multiple hypersurfaces to the datasets, e.g. one per simulated
+    species. Returns a dict with format: { map_0_key : map_0_hypersurface, ..., map_N_key : map_N_hypersurface, }
+
+    Parameters
+    ----------
+    nominal_dataset : dict
+        Definition of the nominal dataset. Specifies the pipleline with which the maps can be created, and the 
+        values of all systematic parameters used to produced the dataset.
+        Format must be: 
+            nominal_dataset = {
+                "pipeline_cfg" = <pipeline cfg file (either cfg file path or dict)>),
+                "sys_params" = { param_0_name : param_0_value_in_dataset, ..., param_N_name : param_N_value_in_dataset }
+            }
+        Sys params must correspond to the provided HypersurfaceParam instances provided in the `params` arg.
+
+    sys_datasets : list of dicts
+        List of dicts, where each dict defines one of the systematics datasets to be fitted.
+        The format of each dict is the same as explained for `nominal_dataset`
+
+    params : list of HypersurfaceParams
+        List of HypersurfaceParams instances that define the hypersurface.
+        Note that this defined ALL hypersurfaces fitted in this function, e.g. only supports a single parameterisation 
+        for all maps (this is almost almost what you want).
+
+    output_dir : str
+        Path to directly to write results file in
+
+    tag : str
+        A string identifier that will be included in the file name to help you make sense of the file in the future.
+        Note that additional information on the contents will be added to the file name by this function.
+
+    combine_regex : list of str, or None
+        List of string regex expressions that will be used for merging maps.
+        Used to combine similar species. 
+        Must be something that can be passed to the `MapSet.combine_re` function (see that functions docs for more details).
+        Choose `None` is do not want to perform this merging.
+        
+    hypersurface_fit_kw : kwargs
+        kwargs will be passed on to the calls to `Hypersurface.fit`
     '''
 
-    #TODO proper docs
+    #TODO Current yneed to manually ensure consistency between `combine_regex` here and the `links` param in `pi_hypersurface`
+    #     Need to make `pi_hypersurface` directly use the value of `combine_regex` from the Hypersurface instance
+
+    #
+    # Make copies
+    #
 
     # Take (deep) copies of lists/dicts to avoid modifying the originals
     # Useful for cases where this function is called in a loop (e.g. leave-one-out tests)
@@ -1010,7 +1234,9 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
     for dataset in all_datasets :
         assert isinstance(dataset, collections.Mapping)
         assert "pipeline_cfg" in dataset
+        assert isinstance(dataset["pipeline_cfg"], (str, collections.Mapping) )
         assert "sys_params" in dataset
+        assert isinstance(dataset["sys_params"], collections.Mapping)
 
     # Check params
     assert len(params) >= 1
@@ -1019,10 +1245,10 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
 
     # Report inputs
     print("Hypersurface fit details :")
-    print("  Num params           : %i" % len(params) )
-    # print("  Num fit coefficients : %i")
-    print("  Num datasets         : 1 nominal + %i systematics" % len(sys_datasets) )
-    print("  Nominal values       : %s" % nominal_dataset["sys_params"] )
+    print("  Num params            : %i" % len(params) )
+    print("  Num fit coefficients  : %i" % sum([ p.num_fit_coeffts for p in params ]) )
+    print("  Num datasets          : 1 nominal + %i systematics" % len(sys_datasets) )
+    print("  Nominal values        : %s" % nominal_dataset["sys_params"] )
 
 
     #
@@ -1041,8 +1267,6 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
             sys_dataset["mapset"] = sys_dataset["mapset"].combine_re(combine_regex)
 
     #TODO check every mapset has the same elements
-
-    #TODO Should I add functionality to store the map combining info (such as compare regex) in a way that means don't need to also specify `links` in the hypersurface stage
 
 
     #
@@ -1084,12 +1308,12 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
             sys_maps=sys_maps,
             sys_param_values=sys_param_values,
             norm=True,
-            **kw
+            **hypersurface_fit_kw
         )
 
         # Report the results
         # print("\nFitted hypersurface report:")
-        # hypersurface.report()
+        # print(hypersurface)
 
         # Store for later write to disk
         hypersurfaces[map_name] = hypersurface
@@ -1119,8 +1343,15 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
 
 def load_hypersurfaces(input_file) :
     '''
-    Function to load file containing hypersurface fits
-    Can be multiple hypersurfaces assosicated with different map keys
+    User function to load file containing hypersurface fits, as written using `fit_hypersurfaces`.
+    Can be multiple hypersurfaces assosicated with different maps.
+
+    Returns a dict with the format: { map_0_key : map_0_hypersurface, ..., map_N_key : map_N_hypersurface, }
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the file contsaining the hypersurface fits.
     '''
 
     #TODO backwards compatibility
@@ -1142,7 +1373,37 @@ def load_hypersurfaces(input_file) :
 Plotting
 '''
 
-def plot_bin_fits(ax,hypersurface,bin_idx,param_name,color=None,label=None,show_nominal=False) :
+def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None, show_nominal=False) :
+    '''
+    Plot the hypersurface for a given bin, in 1D w.r.t. to a single specified parameter.
+    Plots the following:
+      - on-axis data points used in the fit
+      - hypersurface w.r.t to the specified parameter (1D)
+      - nominal value of the specified parameter
+
+    Parameters
+    ----------
+    ax : matplotlib.Axes
+        matplotlib ax to draw the plot on
+
+    hypersurface : Hypersurface
+        Hypersurface to make the plots from
+
+    bin_idx : tuple
+        Index (numpy array indexing format) of the bin to plot
+
+    param_name : str
+        Name of the parameter of interest
+
+    color : str
+        color to use for hypersurface curve
+
+    label : str
+        label to use for hypersurface curve
+
+    show_nominal : bool
+        Indicate the nominal value of the param on the plot
+    '''
 
     import matplotlib.pyplot as plt
 
@@ -1179,7 +1440,8 @@ def plot_bin_fits(ax,hypersurface,bin_idx,param_name,color=None,label=None,show_
     #TODO Add fit uncertainty. Problem using uarrays with np.exp at the minute, may need to shift to bin-wise calc...
     # ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt)-unp.std_devs(y_opt), unp.nominal_values(y_opt)+unp.std_devs(y_opt), color='red', alpha=0.2 )
 
-    # # Optonal : For testing, overlay the uncertainty one would find under the assumption fit parameters are uncorrelated
+    # # Optional : For testing, overlay the uncertainty one would find under the assumption fit parameters are uncorrelated
+    #TODO This is removed until hyperplane uncertainty is re-implemented
     # # Typically straight line fit parameters are strongly correlated, so expect this to be a large overestimation
     # if False :
     #     cov_mat = fit_results["hypersurfaces"][map_name]["cov_matrices"][:,:,zind][idx]
@@ -1199,7 +1461,28 @@ def plot_bin_fits(ax,hypersurface,bin_idx,param_name,color=None,label=None,show_
 
 
 
-def plot_bin_fits_2d(ax,hypersurface,bin_idx,param_names) :
+def plot_bin_fits_2d(ax, hypersurface, bin_idx, param_names ) :
+    '''
+    Plot the hypersurface for a given bin, in 2D w.r.t. to a pair of params
+    Plots the following:
+      - All data points used in the fit
+      - hypersurface w.r.t to the specified parameters (2D)
+      - nominal value of the specified parameters
+
+    Parameters
+    ----------
+    ax : matplotlib.Axes
+        matplotlib ax to draw the plot on
+
+    hypersurface : Hypersurface
+        Hypersurface to make the plots from
+
+    bin_idx : tuple
+        Index (numpy array indexing format) of the bin to plot
+
+    param_names : list of str
+        List containing the names of the two parameters of interest
+    '''
 
     import matplotlib.pyplot as plt
 
@@ -1210,9 +1493,9 @@ def plot_bin_fits_2d(ax,hypersurface,bin_idx,param_names) :
     chosen_bin_values = [ m.nominal_values[bin_idx] for m in hypersurface.fit_maps ]
     chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hypersurface.fit_maps ]
 
+    # Shortcuts to the param values and bin values
     p0 = hypersurface.params[param_names[0]]
     p1 = hypersurface.params[param_names[1]]
-
     z = np.asarray(chosen_bin_values)
     # zerr = #TODO error bars
 
@@ -1227,12 +1510,13 @@ def plot_bin_fits_2d(ax,hypersurface,bin_idx,param_names) :
             off_axis_mask = off_axis_mask & (p.fit_param_values == p.nominal_value)
     off_axis_mask = off_axis_mask & ~(p0_on_axis_mask | p1_on_axis_mask | nominal_mask)
 
+    # Plot data points
     ax.scatter( p0.fit_param_values[p0_on_axis_mask], p1.fit_param_values[p0_on_axis_mask], z[p0_on_axis_mask], marker="o", color="blue", label="%s on-axis"%p0.name )
     ax.scatter( p0.fit_param_values[p1_on_axis_mask], p1.fit_param_values[p1_on_axis_mask], z[p1_on_axis_mask], marker="^", color="red", label="%s on-axis"%p1.name )
     ax.scatter( p0.fit_param_values[off_axis_mask], p1.fit_param_values[off_axis_mask], z[off_axis_mask], marker="s", color="black", label="Off-axis" )
     ax.scatter( p0.fit_param_values[nominal_mask], p1.fit_param_values[nominal_mask], z[nominal_mask], marker="*", color="magenta", label="Nominal" )
 
-    # Plot hypersurface (as a surface)
+    # Plot hypersurface (as a 2D surface)
     x_plot = np.linspace( p0.fit_param_values.min(), p0.fit_param_values.max(), num=100 )
     y_plot = np.linspace( p1.fit_param_values.min(), p1.fit_param_values.max(), num=100 )
     x_grid, y_grid = np.meshgrid(x_plot,y_plot)
@@ -1253,7 +1537,18 @@ def plot_bin_fits_2d(ax,hypersurface,bin_idx,param_names) :
 
 
 
-if __name__ == "__main__" : 
+#
+# Test/example
+#
+
+def hypersurface_example() :
+    '''
+    Simple hypersurface example covering:
+      - Defining the hypersurface
+      - Fitting the coefficients (to toy data)
+      - Saving and re-loading the hypersurfaces
+      - Plotting the results
+    '''
 
     import sys
 
@@ -1348,7 +1643,7 @@ if __name__ == "__main__" :
 
     # Report the results
     print("\nFitted hypersurface report:")
-    hypersurface.report()
+    print(hypersurface)
 
     # Check the fitted parameter values match the truth
     # This only works if `norm=False` in the `hypersurface.fit` call just above
@@ -1370,10 +1665,14 @@ if __name__ == "__main__" :
     # Re-load
     reloaded_hypersurface = Hypersurface.from_state(file_path)
 
-    # Test
-    #TODO
+    # Test the re-loaded hypersurface matches the one we saved
+    print("\nChecking saved and re-loaded hypersurfaces are identical...")
+    assert np.allclose( hypersurface.intercept, reloaded_hypersurface.intercept )
+    for param_name in hypersurface.param_names :
+        assert np.allclose( hypersurface.params[param_name].fit_coeffts, reloaded_hypersurface.params[param_name].fit_coeffts )
+    print("... fit was successful!\n")
 
-    # Done
+    # Continue with the reloaded version
     hypersurface = reloaded_hypersurface
 
 
@@ -1443,3 +1742,6 @@ if __name__ == "__main__" :
         print("Figure saved : %s" % fig_file_path)
 
 
+# Run the examp'es/tests
+if __name__ == "__main__" : 
+    hypersurface_example()
