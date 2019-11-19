@@ -6,7 +6,6 @@ Hypersurfaces can be used to model systematic uncertainties derived from discret
 simulation datasets, for example for detedctor uncertainties.
 """
 
-
 __all__ = ['get_num_args', 'Hypersurface', 'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces', 'plot_bin_fits', 'plot_bin_fits_2d']
 
 __author__ = 'T. Stuttard'
@@ -35,7 +34,7 @@ from pisa import FTYPE, TARGET, ureg
 from pisa.utils import vectorizer
 from pisa.utils.jsons import from_json, to_json
 from pisa.core.pipeline import Pipeline
-from pisa.core.binning import MultiDimBinning
+from pisa.core.binning import OneDimBinning, MultiDimBinning
 from pisa.core.map import Map
 from pisa.utils.fileio import mkdir
 
@@ -76,7 +75,7 @@ Hypersurface functional forms
    Define functional forms for HypersurfaceParam instances here.
 
    Functions defined here MUST:
-     - Be named <something>_hypersurface_hypersurface_func (they are then chosen by the user using `func_name=<something>`).
+     - Be named <something>_hypersurface_func (they are then chosen by the user using `func_name=<something>`).
      - Support numba guvectorization.
      - Function arguments must observed this convention: 
          `p`, `<coefficient 0>`, ..., `<coefficient N>`, `out`
@@ -97,7 +96,7 @@ Hypersurface functional forms
 
 #TODO support uncertainty propagation (difficult because `uncertainties` modules not compatible with numba)
 
-def linear_hypersurface_hypersurface_func(p,m,out) :
+def linear_hypersurface_func(p,m,out) :
     '''
     Linear hypersurface functional form
 
@@ -107,7 +106,7 @@ def linear_hypersurface_hypersurface_func(p,m,out) :
     np.copyto(src=result,dst=out)
 
 
-def exponential_hypersurface_hypersurface_func(p,a,b,out) :
+def exponential_hypersurface_func(p,a,b,out) :
     '''
     Exponential hypersurface functional form
 
@@ -176,7 +175,7 @@ class Hypersurface(object) :
         True -> significantly more print out
     '''
 
-    def __init__(self,params,initial_intercept=None,debug=False) :
+    def __init__(self, params, initial_intercept=None, debug=False ) :
 
         # Store args
         self.initial_intercept = initial_intercept
@@ -193,6 +192,7 @@ class Hypersurface(object) :
 
         # Containers for storing fitting information
         self.fit_complete = False
+        self.fit_info_stored = False
         self.fit_maps_norm = None
         self.fit_maps_raw = None
         self.fit_chi2 = None
@@ -201,6 +201,9 @@ class Hypersurface(object) :
 
         # Serialization
         self._serializable_state = None
+
+        # Legacy handling
+        self.using_legacy_data = False
 
 
     def _init(self, binning, nominal_param_values ) :
@@ -504,6 +507,9 @@ class Hypersurface(object) :
 
             # Store for plotting later
             self.fit_maps_norm = normed_maps  
+        
+        # Record that fit info is now stored
+        self.fit_info_stored = True
 
 
         #
@@ -582,7 +588,7 @@ class Hypersurface(object) :
                 #
 
                 # Must have at least as many sets as free params in fit or else curve_fit will fail
-                assert y.size >= p0.size, "Number of datasets fitted must be >= num free params"
+                assert y.size >= p0.size, "Number of datasets used for fitting (%i) must be >= num free params (%i)" % (y.size, p0.size)
 
                 # Define a callback function for use with `curve_fit`
                 #   x : sys params
@@ -719,6 +725,7 @@ class Hypersurface(object) :
         Return the stored nominal parameter for each dataset
         Returns: { param_0_name : param_0_nom_val, ..., param_N_name : param_N_nom_val }
         '''
+        assert self.fit_info_stored, "Cannot get fit dataset nominal values, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
         return collections.OrderedDict([ (name,param.nominal_value) for name,param in list(self.params.items()) ])
 
     @property
@@ -727,6 +734,7 @@ class Hypersurface(object) :
         Return the stored systematic parameters from the datasets used for fitting
         Returns: { param_0_name : [ param_0_sys_val_0, ..., param_0_sys_val_M ], ..., param_N_name : [ param_N_sys_val_0, ..., param_N_sys_val_M ] }
         '''
+        assert self.fit_info_stored, "Cannot get fit dataset param values, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
         return collections.OrderedDict([ (name,param.fit_param_values) for name,param in list(self.params.items()) ])
 
 
@@ -735,6 +743,7 @@ class Hypersurface(object) :
         '''
         Return number of datasets used for fitting
         '''
+        assert self.fit_info_stored, "Cannot get fit datasets, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
         return list(self.params.values())[0].num_fit_sets
 
 
@@ -742,6 +751,8 @@ class Hypersurface(object) :
         '''
         Return a mask indicating which datasets have nominal values for all parameters
         '''
+
+        assert self.fit_info_stored, "Cannot get nominal mask, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
 
         nom_mask = np.ones((self.num_fit_sets,),dtype=bool)
 
@@ -763,6 +774,8 @@ class Hypersurface(object) :
         param_name : str
             The name of systematic parameter for which we want on-axis datasets
         '''
+
+        assert self.fit_info_stored, "Cannot get on-axis mask, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
 
         assert param_name in self.param_names
 
@@ -815,7 +828,7 @@ class Hypersurface(object) :
         Return the `Map instances used for fitting
         These will be normalised if the fit was performend to normalised maps.
         '''
-        # assert self.fit_complete
+        assert self.fit_info_stored, "Cannot get fit maps, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
         return self.fit_maps_raw if self.fit_maps_norm is None else self.fit_maps_norm
 
 
@@ -824,6 +837,7 @@ class Hypersurface(object) :
         '''
         Return number of datasets used for fitting
         '''
+        assert self.fit_info_stored, "Cannot get fit sets, fit info not stored%s" % (" (using legacy data)" if self.using_legacy_data else "")
         return len(list(self.fit_param_values.values())[0])
 
 
@@ -876,11 +890,13 @@ class Hypersurface(object) :
             state["intercept"] = self.intercept
             state["intercept_sigma"] = self.intercept_sigma
             state["fit_complete"] = self.fit_complete
+            state["fit_info_stored"] = self.fit_info_stored
             state["fit_maps_norm"] = self.fit_maps_norm
             state["fit_maps_raw"] = self.fit_maps_raw
             state["fit_chi2"] = self.fit_chi2
             state["fit_cov_mat"] = self.fit_cov_mat
             state["fit_method"] = self.fit_method
+            state["using_legacy_data"] = self.using_legacy_data
 
             state["params"] = collections.OrderedDict()
             for name,param in list(self.params.items()) :
@@ -987,8 +1003,8 @@ class HypersurfaceParam(object) :
     func_name : str
         Name of the hypersurface function to use.
         See "Hypersurface functional forms" section for more details, including available functions.
-        Reminder: Functions must be named, `<something>_hypersurface_hypersurface_func`, and then `func_name=<something>`.
-        Note that a global search for functions named `<something>_hypersurface_hypersurface_func` is performed, so the 
+        Reminder: Functions must be named, `<something>_hypersurface_func`, and then `func_name=<something>`.
+        Note that a global search for functions named `<something>_hypersurface_func` is performed, so the 
         user can define new functions externally to this file.
 
     initial_fit_coeffts : array
@@ -1024,7 +1040,7 @@ class HypersurfaceParam(object) :
 
         # Get the function
         self.__name__ = func_name
-        self._hypersurface_func = self._get_hypersurface_hypersurface_func(self.__name__)
+        self._hypersurface_func = self._get_hypersurface_func(self.__name__)
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
@@ -1042,14 +1058,14 @@ class HypersurfaceParam(object) :
             assert self.initial_fit_coeffts.size == self.num_fit_coeffts, "'initial_fit_coeffts' should have %i values, found %i" % (self.num_fit_coeffts,self.initial_fit_coeffts.size)
 
 
-    def _get_hypersurface_hypersurface_func(self,func_name) :
+    def _get_hypersurface_func(self,func_name) :
         '''
         Find the function defining the hypersurface functional form.
 
         User specifies this by it's string name, which must correspond to a pre-defined 
-        function with the name `<func_name>_hypersurface_hypersurface_func`.
+        function with the name `<func_name>_hypersurface_func`.
 
-        Note that a global search for functions named `<something>_hypersurface_hypersurface_func` is 
+        Note that a global search for functions named `<something>_hypersurface_func` is 
         performed, so the user can define new functions externally to this file.
 
         Internal function, not to be called by a user.
@@ -1058,13 +1074,13 @@ class HypersurfaceParam(object) :
         assert isinstance(func_name,str), "'func_name' must be a string"
 
         # Form the expected function name
-        hypersurface_hypersurface_func_suffix = "_hypersurface_hypersurface_func"
-        fullfunc_name = func_name + hypersurface_hypersurface_func_suffix
+        hypersurface_func_suffix = "_hypersurface_func"
+        fullfunc_name = func_name + hypersurface_func_suffix
 
         # Find all functions
-        all_hypersurface_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_hypersurface_func_suffix) }
-        assert fullfunc_name in all_hypersurface_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_hypersurface_func_suffix)[0] for f in all_hypersurface_hypersurface_functions])
-        return all_hypersurface_hypersurface_functions[fullfunc_name]
+        all_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_func_suffix) }
+        assert fullfunc_name in all_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_func_suffix)[0] for f in all_hypersurface_functions])
+        return all_hypersurface_functions[fullfunc_name]
 
 
     def _init_fit_coefft_arrays(self,binning) :
@@ -1183,6 +1199,19 @@ class HypersurfaceParam(object) :
 '''
 Hypersurface fitting and loading helper functions
 '''
+
+
+def get_hypersurface_file_name(hypersurface, tag) :
+    '''
+    Create a descriptive file name
+    '''
+
+    num_dims = len(hypersurface.params)
+    param_str = "_".join(hypersurface.param_names)
+    output_file = "%s__hypersurface_fits__%dd__%s.json" % (tag, num_dims, param_str)
+
+    return output_file
+
 
 def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None, **hypersurface_fit_kw) :
     '''
@@ -1350,10 +1379,7 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
     #
 
     # Create a file name
-    num_dims = len(hypersurface.params)
-    param_str = "_".join(hypersurface.param_names)
-    output_file = "%s__hypersurface_fits__%dd__%s.json" % (tag, num_dims, param_str)
-    output_path = os.path.join(output_dir,output_file)
+    output_path = os.path.join( output_dir, get_hypersurface_file_name( list(hypersurfaces.values())[0], tag) )
 
     # Create the output directory
     mkdir(output_dir)
@@ -1380,19 +1406,148 @@ def load_hypersurfaces(input_file) :
         Path to the file contsaining the hypersurface fits.
     '''
 
-    #TODO backwards compatibility
+    # Testing various cases to support older files as well as modern ones...
+    try :
 
-    # Load the file
-    hypersurface_states = from_json(input_file)
-    assert isinstance(hypersurface_states,collections.Mapping)
+        #
+        # Current files
+        #
 
-    # Loop over hypersurface states and load them
-    hyperlanes = collections.OrderedDict()
-    for map_name,hypersurface_state in list(hypersurface_states.items()) :
-        hyperlanes[map_name] = Hypersurface.from_state(hypersurface_state)
+        # Load file
+        hypersurface_states = from_json(input_file)
+        assert isinstance(hypersurface_states,collections.Mapping)
 
-    return hyperlanes
+        # Load hypersurfaces
+        hypersurfaces = collections.OrderedDict()
+        for map_name,hypersurface_state in list(hypersurface_states.items()) :
+            hypersurfaces[map_name] = Hypersurface.from_state(hypersurface_state)
+        return hypersurfaces
 
+                # Loop over hypersurface states and load them
+
+    except :
+        pass
+
+    try :
+
+        #
+        # Legacy files
+        #
+
+        hypersurfaces = load_hypersurfaces_legacy(input_file)
+        print("Old fit files detected, loaded via legacy mode")
+        return hypersurfaces
+
+    except :
+        pass
+
+    #TODO DRAGON/GRECO data release files
+
+    # If made it here, nothing worked
+    raise Exception("Could not load fits in `modern` or `legacy` mode, something is wrong with the file")
+
+
+
+def load_hypersurfaces_legacy(input_file) :
+    '''
+    Load an old hyperpane (not surface) fit file from older PISA version.
+
+    Put the results into an instance the new `Hypersurface` class so can use the 
+    resulting hypersurface in modern code.
+    '''
+
+    hypersurfaces = collections.OrderedDict()
+
+
+    #
+    # Load file
+    #
+
+    input_dict = from_json(input_file)
+    assert isinstance(input_dict,collections.Mapping)
+
+
+    #
+    # Loop over map names
+    #
+
+    for map_name in  input_dict["map_names"] :
+
+
+        #
+        # Create the params
+        #
+
+        # Get the param names
+        param_names = input_dict["sys_list"]
+
+        # Create the param instances.
+        # Using linear functional forms (legacy files only supported linear forms, e.g. 
+        # hyperplanes rather than surfaces).
+        params = [ HypersurfaceParam( name=name, func_name="linear", initial_fit_coeffts=None, ) for name in param_names ]
+
+
+        #
+        # Get binning
+        #
+
+        # This varies depending on how old the file is...
+        # Note that the hypersurface class really only needs to know the binning 
+        # shape (to create the coefficient arrays).
+
+        # If the (serialized version of the) binning is stored, great! Use it
+        if "binning" in input_dict :
+            binning = MultiDimBinning(**input_dict["binning"])
+
+        # If no binning is available, can at least get the correct shape (using 
+        # one of the map arrays) and create a dummy binning instance.
+        # Remember that the final dimension is the sys params, not binning
+        else :
+            binning_shape = input_dict[map_name][...,0].shape # Remove last dimension
+            binning = MultiDimBinning([ OneDimBinning( name="dummy_%i"%i, domain=[0.,1.], is_lin=True, num_bins=dim ) for i,dim in enumerate(binning_shape) ])
+            
+
+        #
+        # Create the hypersurface instance
+        #
+
+        # Create the hypersurface
+        hypersurface = Hypersurface( 
+            params=params, # Specify the systematic parameters
+            initial_intercept=0., # Intercept value (or first guess for fit)
+        )
+
+        # Set some internal members that would normally be configured during fitting
+        # Don't know the nominal values with legacy files, so just stores NaNs
+        hypersurface._init( 
+            binning=binning, 
+            nominal_param_values={ name:np.NaN for name in hypersurface.param_names },
+        )
+
+        # Indicate this is legacy data (not all functionality will work)
+        hypersurface.using_legacy_data = True
+
+
+        #
+        # Get the fit values
+        #
+
+        # Handling two different legacy cases here...
+        fitted_coefficients = input_dict["hyperplanes"][map_name]["fit_params"] if "hyperplanes" in input_dict else input_dict[map_name]
+
+        # Fitted coefficients have following array shape: [ binning dim 0,  ..., binning dim N, sys params (inc. intercept) ]
+        intercept_values = fitted_coefficients[...,0]
+        sys_param_gradient_values = { n:fitted_coefficients[...,i+1] for i,n in enumerate(param_names) }
+
+        # Write the values to the hypersurface
+        np.copyto( src=intercept_values, dst=hypersurface.intercept )
+        for param in hypersurface.params.values() :       
+            np.copyto( src=sys_param_gradient_values[param.name], dst=param.fit_coeffts[...,0] )
+
+        # Done, store the hypersurface
+        hypersurfaces[map_name] = hypersurface
+
+    return hypersurfaces
 
 
 '''
@@ -1607,7 +1762,6 @@ def hypersurface_example() :
     # Here I'm only assigning a single value per dataset, e.g. one bin, for simplicity, but idea extends to realistic binning
 
     # Define binning
-    from pisa.core.binning import OneDimBinning, MultiDimBinning
     binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=3,units=ureg.GeV,is_lin=True)])
     # binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=2,units=ureg.GeV,is_lin=True),OneDimBinning(name="reco_coszen",domain=[-1.,1.],num_bins=3,is_lin=True)])
 
