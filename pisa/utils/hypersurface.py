@@ -250,6 +250,15 @@ class Hypersurface(object) :
 
 
     @property
+    def initialized(self) :
+        '''
+        Return flag indicating if hypersurface has been initialized
+        Not giving use direct write-access to the variable as they should nt be setting it themselves
+        '''
+        return self._initialized
+
+
+    @property
     def param_names(self) :
         '''
         Return the (ordered) names of the systematic parameters
@@ -276,7 +285,7 @@ class Hypersurface(object) :
             Othewise will evaluate all bins.
         '''
 
-        assert self._initialized
+        assert self._initialized, "Cannot evaluate hypersurface, it haas not been initialized"
 
 
         #
@@ -386,7 +395,7 @@ class Hypersurface(object) :
 
         #TODO Add option to exclude bins with too few stats from the fit, leving null hypersurface for them.
         #     This is to avoid issues with bins with tiny stats having crazy gradients from statistical 
-        #     fluctuations (if there are very few events in that bin for that speciesi then that bin shouldn't
+        #     fluctuations (if there are very few events in that bin for that species then that bin shouldn't
         #     be significant in the fit).
 
 
@@ -561,6 +570,7 @@ class Hypersurface(object) :
             assert x_to_use.shape[1] == y_to_use.size
 
             # Get flat list of the fit param guesses
+            # The param coefficients are ordered as [ param 0 cft 0, ..., param 0 cft N, ..., param M cft 0, ..., param M cft N ]
             p0_intercept = self.intercept[bin_idx]
             p0_param_coeffts = [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in list(self.params.values()) for i_cft in range(param.num_fit_coeffts) ]
             p0 = np.array( [p0_intercept] + p0_param_coeffts, dtype=FTYPE )
@@ -801,7 +811,7 @@ class Hypersurface(object) :
 
         Parameters
         ----------
-        bin_idx : tupel of None
+        bin_idx : tuple of None
             Specify a particular bin (using numpy indexing). In this case only report on that bin. 
         '''
 
@@ -984,7 +994,6 @@ class Hypersurface(object) :
         # Define rest of state
         for k in list(state.keys()) :
             setattr(hypersurface,k,state.pop(k))
-            # print k,type(getattr(hypersurface,k)),getattr(hypersurface,k)
 
         return hypersurface
 
@@ -1041,8 +1050,8 @@ class HypersurfaceParam(object) :
         #
 
         # Get the function
-        self.__name__ = func_name
-        self._hypersurface_func = self._get_hypersurface_func(self.__name__)
+        self.func_name = func_name
+        self._hypersurface_func = self._get_hypersurface_func(self.func_name)
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
@@ -1060,7 +1069,7 @@ class HypersurfaceParam(object) :
             assert self.initial_fit_coeffts.size == self.num_fit_coeffts, "'initial_fit_coeffts' should have %i values, found %i" % (self.num_fit_coeffts,self.initial_fit_coeffts.size)
 
 
-    def _get_hypersurface_func(self,func_name) :
+    def _get_hypersurface_func(self, func_name) :
         '''
         Find the function defining the hypersurface functional form.
 
@@ -1085,7 +1094,7 @@ class HypersurfaceParam(object) :
         return all_hypersurface_functions[fullfunc_name]
 
 
-    def _init_fit_coefft_arrays(self,binning) :
+    def _init_fit_coefft_arrays(self, binning) :
         '''
         Create the arrays for storing the fit parameters
         Have one fit per bin, for each parameter
@@ -1107,7 +1116,7 @@ class HypersurfaceParam(object) :
         self.fit_coeffts_sigma = np.full_like(self.fit_coeffts,np.NaN)
 
 
-    def evaluate(self,param,out,bin_idx=None) :
+    def evaluate(self, param, out, bin_idx=None) :
         '''
         Evaluate the functional form for the given `param` values.
         Uses the current values of the fit coefficients.
@@ -1124,8 +1133,6 @@ class HypersurfaceParam(object) :
         # Need to be flexible in terms of the number of fit parameters
         args = [param]
         for cft_idx in range(self.num_fit_coeffts) :
-            # idx = tuple(list(bin_idx) + [cft_idx])
-            # args += [self.fit_coeffts[idx]]
             args += [self.get_fit_coefft(bin_idx=bin_idx,coefft_idx=cft_idx)]
         args += [this_out]
 
@@ -1136,7 +1143,7 @@ class HypersurfaceParam(object) :
         out += this_out
 
 
-    def get_fit_coefft_idx(self,bin_idx=None,coefft_idx=None) :
+    def get_fit_coefft_idx(self, bin_idx=None, coefft_idx=None) :
         '''
         Indexing the fit_coefft matrix is a bit of a pain
         This helper function eases things
@@ -1163,7 +1170,7 @@ class HypersurfaceParam(object) :
         return idx
 
 
-    def get_fit_coefft(self,*args,**kwargs) :
+    def get_fit_coefft(self, *args, **kwargs) :
         '''
         Get a fit coefficient values from the matrix
         Basically just wrapping the indexing function
@@ -1182,7 +1189,7 @@ class HypersurfaceParam(object) :
 
             state = collections.OrderedDict()
             state["name"] = self.name
-            state["func_name"] = self.__name__
+            state["func_name"] = self.func_name
             state["num_fit_coeffts"] = self.num_fit_coeffts
             state["fit_coeffts"] = self.fit_coeffts
             state["fit_coeffts_sigma"] = self.fit_coeffts_sigma
@@ -1201,7 +1208,6 @@ class HypersurfaceParam(object) :
 '''
 Hypersurface fitting and loading helper functions
 '''
-
 
 def get_hypersurface_file_name(hypersurface, tag) :
     '''
@@ -1411,6 +1417,8 @@ def load_hypersurfaces(input_file) :
     ----------
     input_file : str
         Path to the file contsaining the hypersurface fits.
+        For the special case of the datareleases these needs to be the path to all 
+        relevent CSV fles, e.g. "<path/to/datarelease>/hyperplanes_*.csv".
     '''
 
 
@@ -1428,7 +1436,7 @@ def load_hypersurfaces(input_file) :
         if "sys_list" in input_data :
 
             # Legacy case, create a modern hypersurface instance using old hyperplane fits
-            hypersurfaces = load_hypersurfaces_legacy(input_data)
+            hypersurfaces = _load_hypersurfaces_legacy(input_data)
             print("Old fit files detected, loaded via legacy mode")
         
         else :
@@ -1445,8 +1453,7 @@ def load_hypersurfaces(input_file) :
 
     elif input_file.endswith("csv") :
 
-        hypersurfaces = load_hypersurfaces_data_release(input_file)
-
+        hypersurfaces = _load_hypersurfaces_data_release(input_file)
 
 
     #
@@ -1461,12 +1468,14 @@ def load_hypersurfaces(input_file) :
 
 
 
-def load_hypersurfaces_legacy(input_data) :
+def _load_hypersurfaces_legacy(input_data) :
     '''
     Load an old hyperpane (not surface) fit file from older PISA version.
 
     Put the results into an instance the new `Hypersurface` class so can use the 
     resulting hypersurface in modern code.
+
+    User should not use this directly, instead call `load_hypersurfaces`.
     '''
 
     hypersurfaces = collections.OrderedDict()
@@ -1555,12 +1564,14 @@ def load_hypersurfaces_legacy(input_data) :
     return hypersurfaces
 
 
-def load_hypersurfaces_data_release(input_file_prototype) :
+def _load_hypersurfaces_data_release(input_file_prototype) :
     '''
     Load the hypersurface CSV files from an official IceCube data release
+
+    User should not use this directly, instead call `load_hypersurfaces`.
     '''
 
-    #TODO Current only handles DRAGON (analysis A) data release (as was also the case for the older hyperplane code)
+    #TODO Current only handles DRAGON (analysis B) data release (as was also the case for the older hyperplane code)
     #TODO Would need to add support for muon hypersurface (including non-linear params) as well as a different binning 
 
     import pandas as pd
@@ -1623,7 +1634,6 @@ def load_hypersurfaces_data_release(input_file_prototype) :
             assert param_names == map_fit_results.columns.tolist(), "Mismatch between hypersurface params in different files"
 
         # Create the params
-        #TODO support non-linear hypersurface for GRECO muons
         params = [ HypersurfaceParam( name=name, func_name="linear", initial_fit_coeffts=None, ) for name in param_names ]
 
 
