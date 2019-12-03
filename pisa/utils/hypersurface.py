@@ -561,7 +561,9 @@ class Hypersurface(object) :
             assert x_to_use.shape[1] == y_to_use.size
 
             # Get flat list of the fit param guesses
-            p0 = np.array( [self.intercept[bin_idx]] + [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in list(self.params.values()) for i_cft in range(param.num_fit_coeffts) ], dtype=FTYPE )
+            p0_intercept = self.intercept[bin_idx]
+            p0_param_coeffts = [ param.get_fit_coefft(bin_idx=bin_idx,coefft_idx=i_cft) for param in list(self.params.values()) for i_cft in range(param.num_fit_coeffts) ]
+            p0 = np.array( [p0_intercept] + p0_param_coeffts, dtype=FTYPE )
 
 
             #
@@ -1400,55 +1402,66 @@ def load_hypersurfaces(input_file) :
 
     Returns a dict with the format: { map_0_key : map_0_hypersurface, ..., map_N_key : map_N_hypersurface, }
 
+    Hnadling the following input files cases:
+        1) Load files produced using this code (recommended)
+        2) Load files producing using older versions of PISA
+        3) Load public data releases csv formatted files
+
     Parameters
     ----------
     input_file : str
         Path to the file contsaining the hypersurface fits.
     '''
 
-    # Testing various cases to support older files as well as modern ones...
-    try :
 
-        #
-        # Current files
-        #
+    #
+    # PISA hypersurface files
+    #
+
+    if input_file.endswith("json") :
 
         # Load file
-        hypersurface_states = from_json(input_file)
-        assert isinstance(hypersurface_states,collections.Mapping)
+        input_data = from_json(input_file)
+        assert isinstance(input_data, collections.Mapping)
 
-        # Load hypersurfaces
-        hypersurfaces = collections.OrderedDict()
-        for map_name,hypersurface_state in list(hypersurface_states.items()) :
-            hypersurfaces[map_name] = Hypersurface.from_state(hypersurface_state)
-        return hypersurfaces
+        # Testing various cases to support older files as well as modern ones...
+        if "sys_list" in input_data :
 
-                # Loop over hypersurface states and load them
+            # Legacy case, create a modern hypersurface instance using old hyperplane fits
+            hypersurfaces = load_hypersurfaces_legacy(input_data)
+            print("Old fit files detected, loaded via legacy mode")
+        
+        else :
 
-    except :
-        pass
+            # Otherwise assume file is using the modern format
+            hypersurfaces = collections.OrderedDict()
+            for map_name, hypersurface_state in list(input_data.items()) :
+                hypersurfaces[map_name] = Hypersurface.from_state(hypersurface_state)
 
-    try :
 
-        #
-        # Legacy files
-        #
+    #
+    # Public data release file
+    # 
 
-        hypersurfaces = load_hypersurfaces_legacy(input_file)
-        print("Old fit files detected, loaded via legacy mode")
-        return hypersurfaces
+    elif input_file.endswith("csv") :
 
-    except :
-        pass
-
-    #TODO DRAGON/GRECO data release files
-
-    # If made it here, nothing worked
-    raise Exception("Could not load fits in `modern` or `legacy` mode, something is wrong with the file")
+        hypersurfaces = load_hypersurfaces_data_release(input_file)
 
 
 
-def load_hypersurfaces_legacy(input_file) :
+    #
+    # Done
+    #
+
+    else :
+        raise Exception("Unknown file format")
+
+
+    return hypersurfaces
+
+
+
+def load_hypersurfaces_legacy(input_data) :
     '''
     Load an old hyperpane (not surface) fit file from older PISA version.
 
@@ -1460,18 +1473,10 @@ def load_hypersurfaces_legacy(input_file) :
 
 
     #
-    # Load file
-    #
-
-    input_dict = from_json(input_file)
-    assert isinstance(input_dict,collections.Mapping)
-
-
-    #
     # Loop over map names
     #
 
-    for map_name in  input_dict["map_names"] :
+    for map_name in input_data["map_names"] :
 
 
         #
@@ -1479,7 +1484,7 @@ def load_hypersurfaces_legacy(input_file) :
         #
 
         # Get the param names
-        param_names = input_dict["sys_list"]
+        param_names = input_data["sys_list"]
 
         # Create the param instances.
         # Using linear functional forms (legacy files only supported linear forms, e.g. 
@@ -1496,14 +1501,14 @@ def load_hypersurfaces_legacy(input_file) :
         # shape (to create the coefficient arrays).
 
         # If the (serialized version of the) binning is stored, great! Use it
-        if "binning" in input_dict :
-            binning = MultiDimBinning(**input_dict["binning"])
+        if "binning" in input_data :
+            binning = MultiDimBinning(**input_data["binning"])
 
         # If no binning is available, can at least get the correct shape (using 
         # one of the map arrays) and create a dummy binning instance.
         # Remember that the final dimension is the sys params, not binning
         else :
-            binning_shape = input_dict[map_name][...,0].shape # Remove last dimension
+            binning_shape = input_data[map_name][...,0].shape # Remove last dimension
             binning = MultiDimBinning([ OneDimBinning( name="dummy_%i"%i, domain=[0.,1.], is_lin=True, num_bins=dim ) for i,dim in enumerate(binning_shape) ])
             
 
@@ -1533,7 +1538,7 @@ def load_hypersurfaces_legacy(input_file) :
         #
 
         # Handling two different legacy cases here...
-        fitted_coefficients = input_dict["hyperplanes"][map_name]["fit_params"] if "hyperplanes" in input_dict else input_dict[map_name]
+        fitted_coefficients = input_data["hyperplanes"][map_name]["fit_params"] if "hyperplanes" in input_data else input_data[map_name]
 
         # Fitted coefficients have following array shape: [ binning dim 0,  ..., binning dim N, sys params (inc. intercept) ]
         intercept_values = fitted_coefficients[...,0]
@@ -1548,6 +1553,119 @@ def load_hypersurfaces_legacy(input_file) :
         hypersurfaces[map_name] = hypersurface
 
     return hypersurfaces
+
+
+def load_hypersurfaces_data_release(input_file_prototype) :
+    '''
+    Load the hypersurface CSV files from an official IceCube data release
+    '''
+
+    #TODO Current only handles DRAGON (analysis A) data release (as was also the case for the older hyperplane code)
+    #TODO Would need to add support for muon hypersurface (including non-linear params) as well as a different binning 
+
+    import pandas as pd
+
+    hypersurfaces = collections.OrderedDict()
+
+
+    #
+    # Load CSV files
+    #
+
+    fit_results = {}
+    fit_results['nue_cc+nuebar_cc'] = pd.read_csv( input_file_prototype.replace('*', 'nue_cc') )
+    fit_results['numu_cc+numubar_cc'] = pd.read_csv( input_file_prototype.replace('*', 'numu_cc') )
+    fit_results['nutau_cc+nutaubar_cc'] = pd.read_csv( input_file_prototype.replace('*', 'nutau_cc') )
+    fit_results['nu_nc+nubar_nc'] = pd.read_csv( input_file_prototype.replace('*', 'all_nc') )
+
+
+    #
+    # Define what to expect
+    #
+
+    # Define binning
+    # This is highly non-general #TODO improve in future data releases
+    binning = MultiDimBinning([ 
+        OneDimBinning( name="reco_energy", bin_edges=np.log10([5.623413,  7.498942, 10. , 13.335215, 17.782795, 23.713737, 31.622776, 42.16965 , 56.23413]) ),
+        OneDimBinning( name="reco_coszen", bin_edges=np.array([-1., -0.75, -0.5 , -0.25,  0., 0.25, 0.5, 0.75, 1.]) ),
+        OneDimBinning( name="pid", bin_edges=np.array([0, 1, 2]) ),
+    ])
+
+
+    #
+    # Get hyperplane info
+    #
+
+    param_names = None
+
+    for map_name, map_fit_results in fit_results.items() :
+
+        print(map_name)
+
+        #
+        # Get hypersurface params
+        #
+
+        # Remove the bin info from the data frame (only want hyperplane params)
+        # Check that find the same dimensions as the expected binning
+        #TODO Also check bin centers are within expected bins
+        for n in binning.names :
+            midpoints_found = np.unique(map_fit_results.pop(n).values)
+            assert midpoints_found.size == binning[n].num_bins, "Mismatch between expected and actual binning dimensions"
+            
+        # Also extract the special case of the offset
+        offset = map_fit_results.pop("offset")
+
+        # Get the param names (everything remaining is a hypersurface param)
+        if param_names is None :
+            param_names = map_fit_results.columns.tolist()
+        else :
+            assert param_names == map_fit_results.columns.tolist(), "Mismatch between hypersurface params in different files"
+
+        # Create the params
+        #TODO support non-linear hypersurface for GRECO muons
+        params = [ HypersurfaceParam( name=name, func_name="linear", initial_fit_coeffts=None, ) for name in param_names ]
+
+
+        #
+        # Create the hypersurface instance
+        #
+
+        # Create the hypersurface
+        hypersurface = Hypersurface( 
+            params=params, # Specify the systematic parameters
+            initial_intercept=0., # Intercept value (or first guess for fit)
+        )
+
+        # Set some internal members that would normally be configured during fitting
+        # Don't know the nominal values with legacy files, so just stores NaNs
+        hypersurface._init( 
+            binning=binning, 
+            nominal_param_values={ name:np.NaN for name in hypersurface.param_names },
+        )
+
+        # Indicate this is legacy data (not all functionality will work)
+        hypersurface.using_legacy_data = True
+
+
+        #
+        # Get the fit values
+        #
+
+        # Intercept
+        intercept_values = offset.values.reshape(binning.shape)
+        np.copyto( src=intercept_values, dst=hypersurface.intercept )
+
+        # Param gradients
+        for param in hypersurface.params.values() :       
+            sys_param_gradient_values = map_fit_results[param.name].values.reshape(binning.shape)
+            np.copyto( src=sys_param_gradient_values, dst=param.fit_coeffts[...,0] )
+
+        # Done, store the hypersurface
+        hypersurfaces[map_name] = hypersurface
+
+    return hypersurfaces
+
 
 
 '''
@@ -1762,8 +1880,7 @@ def hypersurface_example() :
     # Here I'm only assigning a single value per dataset, e.g. one bin, for simplicity, but idea extends to realistic binning
 
     # Define binning
-    binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=3,units=ureg.GeV,is_lin=True)])
-    # binning = MultiDimBinning([OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=2,units=ureg.GeV,is_lin=True),OneDimBinning(name="reco_coszen",domain=[-1.,1.],num_bins=3,is_lin=True)])
+    binning = MultiDimBinning([ OneDimBinning(name="reco_energy",domain=[0.,10.],num_bins=3,units=ureg.GeV,is_lin=True) ])
 
     # Define the values for the parameters for each dataset
     nom_param_values = {}
@@ -1771,11 +1888,11 @@ def hypersurface_example() :
 
     if "foo" in [ p.name for p in params ] :
         nom_param_values["foo"] = 0.
-        sys_param_values_dict["foo"] = [ 0., 0., 0.,-1.,+1., 1.]
+        sys_param_values_dict["foo"] = [ 0., 0., 0.,-1.,+1., 1. ]
 
     if "bar" in [ p.name for p in params ] :
         nom_param_values["bar"] = 10.
-        sys_param_values_dict["bar"] = [20.,30.,0.,10.,10., 15.]
+        sys_param_values_dict["bar"] = [ 20.,30.,0.,10.,10., 15. ]
 
     # Get number of datasets
     num_sys_datasets = len(list(sys_param_values_dict.values())[0])
@@ -1785,12 +1902,11 @@ def hypersurface_example() :
 
     # Create a dummy "true" hypersurface that can be used to generate some fake bin values for the dataset 
     true_hypersurface = copy.deepcopy(hypersurface)
-    true_hypersurface._init(binning=binning,nominal_param_values=nom_param_values)
+    true_hypersurface._init(binning=binning, nominal_param_values=nom_param_values)
     true_hypersurface.intercept.fill(3.)
     if "foo" in true_hypersurface.params :
         true_hypersurface.params["foo"].fit_coeffts[...,0].fill(2.)
     if "bar" in true_hypersurface.params :
-        # true_hypersurface.params["bar"].fit_coeffts[...,0].fill(2.)
         true_hypersurface.params["bar"].fit_coeffts[...,0].fill(5.)
         true_hypersurface.params["bar"].fit_coeffts[...,1].fill(-0.1)
 
