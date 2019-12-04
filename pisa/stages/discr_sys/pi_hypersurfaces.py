@@ -176,7 +176,7 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
             scalefactors[~np.isfinite(scalefactors)] = 1.
             
             # Add to container
-            np.copyto( src=scalefactors, dst=container["hypersurface_scalefactors"].get(WHERE) )
+            np.copyto( src=scalefactors, dst=container["hypersurface_scalefactors"].get('host') )
             container["hypersurface_scalefactors"].mark_changed()
 
         # Unlink the containers again
@@ -192,16 +192,19 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
                 container["hypersurface_scalefactors"], container["weights"]
             )
 
+            container['weights'].mark_changed()
+
             # Also update uncertainty
             if self.error_method == "sumw2":
                 vectorizer.multiply(
                     container["hypersurface_scalefactors"], container["errors"]
                 )
+                container['errors'].mark_changed()
 
             # Correct negative event counts that can be introduced by hypersurfaces (due to intercept)
-            weights = container["weights"].get(WHERE)
+            weights = container["weights"].get('host')
             neg_mask = weights < 0.
             if neg_mask.sum() > 0 :
                 weights[neg_mask] = 0.
-                np.copyto( src=weights, dst=container["weights"].get(WHERE) )
+                np.copyto( src=weights, dst=container["weights"].get('host') )
                 container["weights"].mark_changed()
