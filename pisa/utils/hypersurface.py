@@ -76,7 +76,6 @@ Hypersurface functional forms
    Define functional forms for HypersurfaceParam instances here.
 
    Functions defined here MUST:
-     - Be named <something>_hypersurface_func (they are then chosen by the user using `func_name=<something>`).
      - Support numba guvectorization.
      - Function arguments must observed this convention: 
          `p`, `<coefficient 0>`, ..., `<coefficient N>`, `out`
@@ -90,9 +89,6 @@ Hypersurface functional forms
      - Evaluating a fitted hypersurface. This is done for all bins simultaneously, using a single value for p.
        - Params are then: `p` is scalar (current value of systematic parameter, coefficients and `out` are arrays
          representing the hypersurfaces of all bins per bin.
- 
-   The argument definitions are then:
-     - 
 '''
 
 #TODO support uncertainty propagation (difficult because `uncertainties` modules not compatible with numba)
@@ -115,6 +111,12 @@ def exponential_hypersurface_func(p,a,b,out) :
     '''
     result = a * np.exp(b*p)
     np.copyto(src=result,dst=out)
+
+
+# Container holding all possible functions
+HYPERSURFACE_PARAM_FUNCTIONS = collections.OrderedDict()
+HYPERSURFACE_PARAM_FUNCTIONS["linear"] = linear_hypersurface_func
+HYPERSURFACE_PARAM_FUNCTIONS["exponential"] = exponential_hypersurface_func
 
 
 
@@ -1004,9 +1006,6 @@ class HypersurfaceParam(object) :
     func_name : str
         Name of the hypersurface function to use.
         See "Hypersurface functional forms" section for more details, including available functions.
-        Reminder: Functions must be named, `<something>_hypersurface_func`, and then `func_name=<something>`.
-        Note that a global search for functions named `<something>_hypersurface_func` is performed, so the 
-        user can define new functions externally to this file.
 
     initial_fit_coeffts : array
         Initial values for the coefficients of the functional form
@@ -1045,7 +1044,6 @@ class HypersurfaceParam(object) :
 
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
-        #TODO Not testwd for GPus
         self.num_fit_coeffts = get_num_args(self._hypersurface_func) - 2
 
         # Check and init the fit param initial values
@@ -1056,7 +1054,7 @@ class HypersurfaceParam(object) :
         else :
             # Use the provided initial values
             self.initial_fit_coeffts = np.array(self.initial_fit_coeffts)
-            assert self.initial_fit_coeffts.size == self.num_fit_coeffts, "'initial_fit_coeffts' should have %i values, found %i" % (self.num_fit_coeffts,self.initial_fit_coeffts.size)
+            assert self.initial_fit_coeffts.size == self.num_fit_coeffts, "'initial_fit_coeffts' should have %i values, found %i" % (self.num_fit_coeffts, self.initial_fit_coeffts.size)
 
 
     def _get_hypersurface_func(self, func_name) :
@@ -1064,24 +1062,15 @@ class HypersurfaceParam(object) :
         Find the function defining the hypersurface functional form.
 
         User specifies this by it's string name, which must correspond to a pre-defined 
-        function with the name `<func_name>_hypersurface_func`.
-
-        Note that a global search for functions named `<something>_hypersurface_func` is 
-        performed, so the user can define new functions externally to this file.
+        function in `HYPERSURFACE_PARAM_FUNCTIONS`.
 
         Internal function, not to be called by a user.
         '''
 
         assert isinstance(func_name,str), "'func_name' must be a string"
 
-        # Form the expected function name
-        hypersurface_func_suffix = "_hypersurface_func"
-        fullfunc_name = func_name + hypersurface_func_suffix
-
-        # Find all functions
-        all_hypersurface_functions = { k:v for k,v in list(globals().items()) if k.endswith(hypersurface_func_suffix) }
-        assert fullfunc_name in all_hypersurface_functions, "Cannot find hypersurface function '%s', choose from %s" % (func_name,[f.split(hypersurface_func_suffix)[0] for f in all_hypersurface_functions])
-        return all_hypersurface_functions[fullfunc_name]
+        assert func_name in HYPERSURFACE_PARAM_FUNCTIONS, "Cannot find hypersurface function '%s', choose from %s" % ( func_name, list(HYPERSURFACE_PARAM_FUNCTIONS.keys()) )
+        return HYPERSURFACE_PARAM_FUNCTIONS[func_name]
 
 
     def _init_fit_coefft_arrays(self, binning) :
