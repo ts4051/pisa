@@ -99,14 +99,13 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         self.fit_results_file = fit_results_file
 
         # Load hypersurfaces
-        self.hypersurfaces = load_hypersurfaces(self.fit_results_file)
+        self.hypersurfaces = load_hypersurfaces(self.fit_results_file, calc_specs)
 
         # Get the expected param names
         # These are used as the expected param names for the stage
         self.hypersurface_param_names = list(self.hypersurfaces.values())[0].param_names
 
         # -- Initialize base class -- #
-
         super(pi_hypersurfaces, self).__init__(
             data=data,
             params=params,
@@ -145,10 +144,6 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
         # create containers for scale factors
         for container in self.data :
             container["hypersurface_scalefactors"] = np.empty(container.size, dtype=FTYPE)
-
-        # Check binning compatibility
-        for key, hypersurface in self.hypersurfaces.items() : 
-            assert self.data.data_specs.hash == hypersurface.binning.hash, "Hypersurface binning does not match binning of data"
 
         # Check map names match between data container and hypersurfaces
         for container in self.data:

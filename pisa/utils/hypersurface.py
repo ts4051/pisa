@@ -1401,7 +1401,7 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
 
 
 
-def load_hypersurfaces(input_file) :
+def load_hypersurfaces(input_file, expected_binning=None) :
     '''
     User function to load file containing hypersurface fits, as written using `fit_hypersurfaces`.
     Can be multiple hypersurfaces assosicated with different maps.
@@ -1419,6 +1419,11 @@ def load_hypersurfaces(input_file) :
         Path to the file contsaining the hypersurface fits.
         For the special case of the datareleases these needs to be the path to all 
         relevent CSV fles, e.g. "<path/to/datarelease>/hyperplanes_*.csv".
+    expected_binning : One/MultiDimBinning
+        (Optional) Expected binning for hypersurface.
+        It will checked enforced that this mathes the binning found in the parsed hypersurfaces.
+        For certain legacy cases where binning info is not stored, this will be assumed to be 
+        the actual binning.
     '''
 
 
@@ -1453,7 +1458,7 @@ def load_hypersurfaces(input_file) :
 
     elif input_file.endswith("csv") :
 
-        hypersurfaces = _load_hypersurfaces_data_release(input_file)
+        hypersurfaces = _load_hypersurfaces_data_release(input_file, expected_binning)
 
 
     #
@@ -1463,6 +1468,10 @@ def load_hypersurfaces(input_file) :
     else :
         raise Exception("Unknown file format")
 
+    # Check binning
+    if expected_binning is not None :
+        for hypersurface in hypersurfaces.values() :
+            assert hypersurface.binning.hash == expected_binning.hash, ""
 
     return hypersurfaces
 
@@ -1564,7 +1573,7 @@ def _load_hypersurfaces_legacy(input_data) :
     return hypersurfaces
 
 
-def _load_hypersurfaces_data_release(input_file_prototype) :
+def _load_hypersurfaces_data_release(input_file_prototype, binning) :
     '''
     Load the hypersurface CSV files from an official IceCube data release
 
@@ -1580,6 +1589,13 @@ def _load_hypersurfaces_data_release(input_file_prototype) :
 
 
     #
+    # Check inputs
+    #
+
+    assert binning is not None, "Must provide binning when loading data release hypersurfaces"
+
+
+    #
     # Load CSV files
     #
 
@@ -1588,19 +1604,6 @@ def _load_hypersurfaces_data_release(input_file_prototype) :
     fit_results['numu_cc+numubar_cc'] = pd.read_csv( input_file_prototype.replace('*', 'numu_cc') )
     fit_results['nutau_cc+nutaubar_cc'] = pd.read_csv( input_file_prototype.replace('*', 'nutau_cc') )
     fit_results['nu_nc+nubar_nc'] = pd.read_csv( input_file_prototype.replace('*', 'all_nc') )
-
-
-    #
-    # Define what to expect
-    #
-
-    # Define binning
-    # This is highly non-general #TODO improve in future data releases
-    binning = MultiDimBinning([ 
-        OneDimBinning( name="reco_energy", bin_edges=np.log10([5.623413,  7.498942, 10. , 13.335215, 17.782795, 23.713737, 31.622776, 42.16965 , 56.23413]) ),
-        OneDimBinning( name="reco_coszen", bin_edges=np.array([-1., -0.75, -0.5 , -0.25,  0., 0.25, 0.5, 0.75, 1.]) ),
-        OneDimBinning( name="pid", bin_edges=np.array([0, 1, 2]) ),
-    ])
 
 
     #
