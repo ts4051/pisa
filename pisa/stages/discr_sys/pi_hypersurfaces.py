@@ -173,7 +173,11 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
 
             # Where there are no scalefactors (e.g. empty bins), set scale factor to 1 
             #TODO maybe this should be handle by Hypersurface.evaluate directly??
-            scalefactors[~np.isfinite(scalefactors)] = 1.
+            empty_bins_mask = ~np.isfinite(scalefactors)
+            num_empty_bins = np.sum(empty_bins_mask)
+            if num_empty_bins > 0. :
+                logging.warn("%i empty bins found in hypersurface" % num_empty_bins)
+            scalefactors[empty_bins_mask] = 1.
             
             # Add to container
             np.copyto( src=scalefactors, dst=container["hypersurface_scalefactors"].get(WHERE) )
