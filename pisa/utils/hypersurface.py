@@ -34,7 +34,7 @@ from pisa import FTYPE, TARGET, ureg
 from pisa.utils import vectorizer
 from pisa.utils.jsons import from_json, to_json
 from pisa.core.pipeline import Pipeline
-from pisa.core.binning import OneDimBinning, MultiDimBinning
+from pisa.core.binning import OneDimBinning, MultiDimBinning, is_binning
 from pisa.core.map import Map
 from pisa.utils.fileio import mkdir
 
@@ -1425,6 +1425,15 @@ def load_hypersurfaces(input_file, expected_binning=None) :
         For certain legacy cases where binning info is not stored, this will be assumed to be 
         the actual binning.
     '''
+
+    #
+    # Check inputs
+    #
+
+    assert isinstance(input_file, str)
+
+    if expected_binning is not None :
+        assert is_binning(expected_binning)
 
 
     #
