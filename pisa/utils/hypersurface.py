@@ -356,7 +356,7 @@ class Hypersurface(object) :
 
 
     def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method="lm",
-            smooth=False, smooth_kw=None, fix_intercept=False, intercept_bounds=None ) :
+            smooth=False, smooth_kw=None, fix_intercept=False, intercept_bounds=None, include_empty=False ) :
         '''
         Fit the hypersurface coefficients (in every bin) to best match the provided nominal
         and systematic datasets.
@@ -404,6 +404,10 @@ class Hypersurface(object) :
         
         intercept_bounds : 2-tuple, optional
             Bounds on the intercept. Default is None (no bounds)
+        
+        include_empty : bool
+            Include empty bins in the fit. If True, empty bins are included with value 0 and sigma 1.
+            Default: False
         '''
 
         #TODO Add option to exclude bins with too few stats from the fit, leving null hypersurface for them.
@@ -559,14 +563,17 @@ class Hypersurface(object) :
             # May remove some points before fitting if find issues
             scan_point_mask = np.ones( y.shape, dtype=bool) 
 
-            # Cases where we have a y_sigma element = 0 (normally because the corresponding y element = 0) screw up the fits (least squares divides by sigma, so get infs)
-            # Need to handle these cases here
-            # For now, I assing an new non-zero sigma value instead
-            # Could also try masking off the points, but find that I have cases where I then don't have enough sets to fit the number of parameters I need
+            # Cases where we have a y_sigma element = 0 (normally because the corresponding y element = 0)
+            # screw up the fits (least squares divides by sigma, so get infs)
+            # By default, we ignore empty bins. If the user wishes to include them, it can be done with 
+            # a value of zero and standard deviation of 1. 
             #TODO Look into a good solution to this in more detail
             bad_sigma_mask = y_sigma == 0.
-            if bad_sigma_mask.sum() > 0 :
-                y_sigma[bad_sigma_mask] = 1.
+            if bad_sigma_mask.sum() > 0:
+                if include_empty:
+                    y_sigma[bad_sigma_mask] = 1.
+                else:
+                    scan_point_mask = scan_point_mask & ~bad_sigma_mask
 
             # Apply the mask to get the values I will actually use
             x_to_use = np.array([ xx[scan_point_mask] for xx in x ])
@@ -672,13 +679,16 @@ class Hypersurface(object) :
                 eps = np.finfo(FTYPE).eps
  
                 # Debug logging
-                test_bin_idx = (0,0,0) 
+                test_bin_idx = (1, 2, 1)
                 if bin_idx == test_bin_idx :
                     msg = ">>>>>>>>>>>>>>>>>>>>>>>\n"
                     msg += "Curve fit inputs to bin %s :\n" % (bin_idx,) 
                     msg += "  x           : \n%s\n" % x
                     msg += "  y           : \n%s\n" % y
                     msg += "  y sigma     : \n%s\n" % y_sigma
+                    msg += "  x used      : \n%s\n" % x_to_use
+                    msg += "  y used      : \n%s\n" % y_to_use
+                    msg += "  y sigma used: \n%s\n" % y_sigma_to_use
                     msg += "  p0          : %s\n" % p0
                     msg += "  lower bounds: %s\n" % fit_bounds[0]
                     msg += "  upper bounds: %s\n" % fit_bounds[1]
