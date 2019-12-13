@@ -181,18 +181,12 @@ class Hypersurface(object) :
 
     initial_intercept : float
         Starting point for the hypersurface intercept in any fits
-    
-    fix_intercept : bool
-        Fix intercept to the initial intercept. Requires that initial intercept is not None.
     '''
 
-    def __init__(self, params, initial_intercept=None):#, fix_intercept=False ) :
+    def __init__(self, params, initial_intercept=None):
 
         # Store args
         self.initial_intercept = initial_intercept
-#         if fix_intercept:
-#             assert initial_intercept is not None, "initial intercept is required when fix_intercept is true"
-#         self.fix_intercept = fix_intercept
         # Store params as dict for ease of lookup
         self.params = collections.OrderedDict()
         for param in params :
@@ -361,7 +355,8 @@ class Hypersurface(object) :
 
 
 
-    def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method="lm", smooth=False, smooth_kw=None, fix_intercept=False ) :
+    def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method="lm",
+            smooth=False, smooth_kw=None, fix_intercept=False, intercept_bounds=None ) :
         '''
         Fit the hypersurface coefficients (in every bin) to best match the provided nominal
         and systematic datasets.
@@ -406,6 +401,9 @@ class Hypersurface(object) :
         
         fix_intercept : bool
             Fix intercept to the initial intercept.
+        
+        intercept_bounds : 2-tuple, optional
+            Bounds on the intercept. Default is None (no bounds)
         '''
 
         #TODO Add option to exclude bins with too few stats from the fit, leving null hypersurface for them.
@@ -640,7 +638,35 @@ class Hypersurface(object) :
 
                     return self.evaluate(params_unflattened,bin_idx=bin_idx)
 
-
+                # Define fit bounds for `curve_fit`
+                # The bounds for the fit are assembled from the bounds of the individual parameters 
+                # in the same order as the parameters are evaluated in the callback function.
+                # If there are no bounds for a particular parameter, its bounds are set to (-np.inf, np.inf)
+                if intercept_bounds is None:
+                    _intercept_bounds = (-np.inf, np.inf)
+                else:
+                    _intercept_bounds = intercept_bounds
+                assert len(_intercept_bounds) == 2, "bounds must be given as a 2-tuple"
+                fit_bounds_lower = [] if fix_intercept else [_intercept_bounds[0]]
+                fit_bounds_upper = [] if fix_intercept else [_intercept_bounds[1]]
+                for param in self.params.values():
+                    if param.bounds is None:
+                        fit_bounds_lower.extend([-np.inf]*param.num_fit_coeffts)
+                        fit_bounds_upper.extend([np.inf]*param.num_fit_coeffts)
+                    else:
+                        if isinstance(param.bounds[0], collections.Sequence):
+                            fit_bounds_lower.extend(param.bounds[0])
+                        else:
+                            fit_bounds_lower.extend([param.bounds[0]]*param.num_fit_coeffts)
+                        if isinstance(param.bounds[1], collections.Sequence):
+                            fit_bounds_upper.extend(param.bounds[1])
+                        else:
+                            fit_bounds_upper.extend([param.bounds[1]]*param.num_fit_coeffts)
+                if np.any(np.isfinite(fit_bounds_lower)) or np.any(np.isfinite(fit_bounds_upper)):
+                    fit_bounds = (fit_bounds_lower, fit_bounds_upper)
+                else:
+                    fit_bounds = (-np.inf, np.inf)
+                
                 # Define the EPS (step length) used by the fitter
                 # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
                 eps = np.finfo(FTYPE).eps
@@ -654,6 +680,8 @@ class Hypersurface(object) :
                     msg += "  y           : \n%s\n" % y
                     msg += "  y sigma     : \n%s\n" % y_sigma
                     msg += "  p0          : %s\n" % p0
+                    msg += "  lower bounds: %s\n" % fit_bounds[0]
+                    msg += "  upper bounds: %s\n" % fit_bounds[1]
                     msg += "  fit method  : %s\n" % self.fit_method
                     msg += "<<<<<<<<<<<<<<<<<<<<<<<"
                     logging.debug(msg)
@@ -672,6 +700,7 @@ class Hypersurface(object) :
                     p0=p0,
                     sigma=y_sigma_to_use,
                     absolute_sigma=True, #TODO check this is really what we want
+                    bounds=fit_bounds,
                     maxfev=1000000, #TODO arg?
                     method=self.fit_method,
                     **curve_fit_kw
@@ -1030,10 +1059,17 @@ class HypersurfaceParam(object) :
     initial_fit_coeffts : array
         Initial values for the coefficients of the functional form
         Number and meaning of coefficients depends on functional form
+    
+    bounds : 2-tuple of array_like, optional
+        Lower and upper bounds on independent variables. Defaults to no bounds.
+        Each element of the tuple must be either an array with the length equal
+        to the number of parameters, or a scalar (in which case the bound is
+        taken to be the same for all parameters.) Use ``np.inf`` with an
+        appropriate sign to disable bounds on all or some parameters.
     '''
 
 
-    def __init__(self, name, func_name, initial_fit_coeffts=None ) :
+    def __init__(self, name, func_name, initial_fit_coeffts=None, bounds=None ) :
 
         # Store basic members
         self.name = name
@@ -1042,7 +1078,7 @@ class HypersurfaceParam(object) :
         self.fit_coeffts = None # Fit params container, not yet populated
         self.fit_coeffts_sigma = None # Fit param sigma container, not yet populated
         self.initial_fit_coeffts = initial_fit_coeffts # The initial values for the fit parameters
-
+        self.bounds = bounds
         # Record information relating to the fitting
         self.fitted = False # Flag indicating whether fit has been performed
         self.fit_param_values = None # The values of this sys param in each of the fitting datasets
@@ -1197,7 +1233,7 @@ class HypersurfaceParam(object) :
             state["fit_param_values"] = self.fit_param_values
             state["binning_shape"] = self.binning_shape
             state["nominal_value"] = self.nominal_value
-
+            state["bounds"] = self.bounds
             self._serializable_state = state
 
         return self._serializable_state 
