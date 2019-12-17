@@ -28,7 +28,7 @@ __license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
 import os, sys, collections, copy, inspect
 
 import numpy as np
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize, LbfgsInvHessProduct
 
 from pisa import FTYPE, TARGET, ureg
 from pisa.utils import vectorizer
@@ -127,7 +127,6 @@ HYPERSURFACE_PARAM_FUNCTIONS["linear"] = linear_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["quadratic"] = quadratic_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["exponential"] = exponential_hypersurface_func
 
-
 '''
 Core hypersurface classes
 '''
@@ -183,7 +182,7 @@ class Hypersurface(object) :
         Starting point for the hypersurface intercept in any fits
     '''
 
-    def __init__(self, params, initial_intercept=None):
+    def __init__(self, params, initial_intercept=None, log=True):
 
         # Store args
         self.initial_intercept = initial_intercept
@@ -192,7 +191,8 @@ class Hypersurface(object) :
         for param in params :
             assert param.name not in self.params, "Duplicate param name found : %s" % param.name
             self.params[param.name] = param
-
+            
+        self.log = log
         # Internal state
         self._initialized = False
 
@@ -228,7 +228,7 @@ class Hypersurface(object) :
 
         # Set a default initial intercept value if none provided
         if self.initial_intercept is None :
-            self.initial_intercept = 1.
+            self.initial_intercept = 0. if self.log else 1.
 
         # Create the fit coefficient arrays
         # Have one fit per bin
@@ -350,13 +350,17 @@ class Hypersurface(object) :
         # Evaluate each individual parameter
         for k,p in list(self.params.items()) :
             p.evaluate(param_values[k] - p.nominal_value,out=out,bin_idx=bin_idx)
+        
+        if self.log:
+            return np.exp(out)
+        else:
+            return out
 
-        return out
 
 
-
-    def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method="lm",
-            smooth=False, smooth_kw=None, fix_intercept=False, intercept_bounds=None, include_empty=False ) :
+    def fit(self, nominal_map, nominal_param_values, sys_maps, sys_param_values, norm=True, method="L-BFGS-B",
+            smooth=False, smooth_kw=None, fix_intercept=False, intercept_bounds=None, intercept_sigma=None,
+            include_empty=False ) :
         '''
         Fit the hypersurface coefficients (in every bin) to best match the provided nominal
         and systematic datasets.
@@ -385,7 +389,7 @@ class Hypersurface(object) :
             In principal the hypersurfaces are more general though and could be used for other tasks too, hence this option.
 
         method : str
-            `method` arg to pass to `scipy.optimize.curve_fit`
+            `method` arg to pass to `scipy.optimize.minimiza`
 
         smooth : str
             Smoothing method to use. Choose `None` if do not want smoothing.
@@ -438,7 +442,7 @@ class Hypersurface(object) :
             assert all([ np.isscalar(v) for v in sys_param_vals.values() ])
             assert sys_map.binning == nominal_map.binning
 
-
+        assert not (include_empty and self.log), "empty bins cannot be included in log mode"
         #
         # Format things before getting started
         #
@@ -644,42 +648,56 @@ class Hypersurface(object) :
                         params_unflattened[param_name] = x[i]
 
                     return self.evaluate(params_unflattened,bin_idx=bin_idx)
-
-                # Define fit bounds for `curve_fit`
-                # The bounds for the fit are assembled from the bounds of the individual parameters 
-                # in the same order as the parameters are evaluated in the callback function.
-                # If there are no bounds for a particular parameter, its bounds are set to (-np.inf, np.inf)
-                if intercept_bounds is None:
-                    _intercept_bounds = (-np.inf, np.inf)
+                
+                inv_param_sigma = []
+                if intercept_sigma is not None:
+                    inv_param_sigma.append(1./intercept_sigma)
                 else:
-                    _intercept_bounds = intercept_bounds
-                assert len(_intercept_bounds) == 2, "bounds must be given as a 2-tuple"
-                fit_bounds_lower = [] if fix_intercept else [_intercept_bounds[0]]
-                fit_bounds_upper = [] if fix_intercept else [_intercept_bounds[1]]
+                    inv_param_sigma.append(0.)
+                for param in list(self.params.values()):
+                    if param.coeff_prior_sigma is not None:
+                        for j in range(param.num_fit_coeffts):
+                            inv_param_sigma.append(1./param.coeff_prior_sigma[j])
+                    else:
+                        for j in range(param.num_fit_coeffts):
+                            inv_param_sigma.append(0.)
+                inv_param_sigma = np.array(inv_param_sigma)
+                assert np.all(np.isfinite(inv_param_sigma)), "invalid values found in prior sigma. They must not be zero."
+                
+                def loss(p):
+                    '''
+                    Loss to be minimized during the fit. 
+                    '''
+                    fvals = callback(x_to_use, *p)
+                    return np.sum(((fvals - y_to_use)/y_sigma_to_use)**2) + np.sum((inv_param_sigma*p)**2)
+                # Define fit bounds for `minimize`. Bounds are pairs of (min, max) values for 
+                # each parameter in the fit. Use 'None' in place of min/max if there is 
+                # no bound in that direction.
+                fit_bounds = []
+                if intercept_bounds is None:
+                    fit_bounds.append((None, None))
+                else:
+                    assert (len(intercept_bounds) == 2) and (np.ndim(intercept_bounds) == 1), "intercept bounds must be given as 2-tuple"
+                    fit_bounds.append(intercept_bounds)
+
+                
                 for param in self.params.values():
                     if param.bounds is None:
-                        fit_bounds_lower.extend([-np.inf]*param.num_fit_coeffts)
-                        fit_bounds_upper.extend([np.inf]*param.num_fit_coeffts)
+                        fit_bounds.extend(((None, None),)*param.num_fit_coeffts)
                     else:
-                        if isinstance(param.bounds[0], collections.Sequence):
-                            fit_bounds_lower.extend(param.bounds[0])
-                        else:
-                            fit_bounds_lower.extend([param.bounds[0]]*param.num_fit_coeffts)
-                        if isinstance(param.bounds[1], collections.Sequence):
-                            fit_bounds_upper.extend(param.bounds[1])
-                        else:
-                            fit_bounds_upper.extend([param.bounds[1]]*param.num_fit_coeffts)
-                if np.any(np.isfinite(fit_bounds_lower)) or np.any(np.isfinite(fit_bounds_upper)):
-                    fit_bounds = (fit_bounds_lower, fit_bounds_upper)
-                else:
-                    fit_bounds = (-np.inf, np.inf)
+                        if np.ndim(param.bounds) == 1:
+                            assert len(param.bounds) == 2, "bounds on single coefficients must be given as 2-tuples"
+                            fit_bounds.append(param.bounds)
+                        elif np.ndim(param.bounds) == 2:
+                            assert np.all([len(t) == 2 for t in param.bounds]), "bounds must be given as a tuple of 2-tuples" 
+                            fit_bounds.extend(param.bounds)
                 
                 # Define the EPS (step length) used by the fitter
                 # Need to take care with floating type precision, don't want to go smaller than the FTYPE being used by PISA can handle
                 eps = np.finfo(FTYPE).eps
  
                 # Debug logging
-                test_bin_idx = (1, 2, 1)
+                test_bin_idx = (0, 0, 0)
                 if bin_idx == test_bin_idx :
                     msg = ">>>>>>>>>>>>>>>>>>>>>>>\n"
                     msg += "Curve fit inputs to bin %s :\n" % (bin_idx,) 
@@ -690,35 +708,25 @@ class Hypersurface(object) :
                     msg += "  y used      : \n%s\n" % y_to_use
                     msg += "  y sigma used: \n%s\n" % y_sigma_to_use
                     msg += "  p0          : %s\n" % p0
-                    msg += "  lower bounds: %s\n" % fit_bounds[0]
-                    msg += "  upper bounds: %s\n" % fit_bounds[1]
+                    msg += "  bounds      : \n%s\n" % fit_bounds
+                    msg += "  inv sigma   : \n%s\n" % inv_param_sigma
                     msg += "  fit method  : %s\n" % self.fit_method
                     msg += "<<<<<<<<<<<<<<<<<<<<<<<"
                     logging.debug(msg)
 
-                # Define some settings to use with `curve_fit` that vary with fit method
-                curve_fit_kw = {}
-                if self.fit_method == "lm" :
-                    curve_fit_kw["epsfcn"] = eps
-
-                # Perform fit
-                #TODO rescale all params to [0,1] as we do for minimizers?
-                popt, pcov = curve_fit(
-                    callback,
-                    x_to_use,
-                    y_to_use,
-                    p0=p0,
-                    sigma=y_sigma_to_use,
-                    absolute_sigma=True, #TODO check this is really what we want
-                    bounds=fit_bounds,
-                    maxfev=1000000, #TODO arg?
-                    method=self.fit_method,
-                    **curve_fit_kw
-                )
-
+                # Perform fit              
+                minres = minimize(loss, p0, method=self.fit_method, bounds=fit_bounds,
+                                  # options={'disp': bin_idx == test_bin_idx},
+                                 )
+                if bin_idx == test_bin_idx:
+                    logging.debug(minres.__str__())
+                popt = minres.x
+                if type(minres.hess_inv) == LbfgsInvHessProduct:
+                    pcov = minres.hess_inv.todense()
+                else:
+                    pcov = minres.hess_inv
                 # Check the fit was successful
                 #TODO curve_fit doesn't return anything that use here, so need another method. Check on chi2 could work...
-
 
             #
             # Re-format fit results
@@ -954,6 +962,7 @@ class Hypersurface(object) :
             state["_initialized"] = self._initialized
             state["binning"] = self.binning.serializable_state
             state["initial_intercept"] = self.initial_intercept
+            state["log"] = self.log
             state["intercept"] = self.intercept
             state["intercept_sigma"] = self.intercept_sigma
             state["fit_complete"] = self.fit_complete
@@ -1076,10 +1085,14 @@ class HypersurfaceParam(object) :
         to the number of parameters, or a scalar (in which case the bound is
         taken to be the same for all parameters.) Use ``np.inf`` with an
         appropriate sign to disable bounds on all or some parameters.
+    
+    coeff_prior_sigma : array, optional
+        Prior sigma values for the coefficients. If None (default), no regularization will
+        be applied during the fit. 
     '''
 
 
-    def __init__(self, name, func_name, initial_fit_coeffts=None, bounds=None ) :
+    def __init__(self, name, func_name, initial_fit_coeffts=None, bounds=None, coeff_prior_sigma=None ) :
 
         # Store basic members
         self.name = name
@@ -1089,6 +1102,8 @@ class HypersurfaceParam(object) :
         self.fit_coeffts_sigma = None # Fit param sigma container, not yet populated
         self.initial_fit_coeffts = initial_fit_coeffts # The initial values for the fit parameters
         self.bounds = bounds
+        self.coeff_prior_sigma = coeff_prior_sigma
+        
         # Record information relating to the fitting
         self.fitted = False # Flag indicating whether fit has been performed
         self.fit_param_values = None # The values of this sys param in each of the fitting datasets
@@ -1111,7 +1126,8 @@ class HypersurfaceParam(object) :
         # Get the number of functional form parameters
         # This is the functional form function parameters, excluding the systematic paramater and the output object
         self.num_fit_coeffts = get_num_args(self._hypersurface_func) - 2
-
+        if self.coeff_prior_sigma is not None:
+            assert len(self.coeff_prior_sigma) == self.num_fit_coeffts, "number of prior sigma values must equal the number of parameters."
         # Check and init the fit param initial values
         #TODO Add support for "per bin" initial values
         if initial_fit_coeffts is None :
@@ -1266,7 +1282,8 @@ def get_hypersurface_file_name(hypersurface, tag) :
     return output_file
 
 
-def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None, **hypersurface_fit_kw) :
+def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, combine_regex=None,
+                      log=True, **hypersurface_fit_kw) :
     '''
     A helper function that a user can use to fit hypersurfaces to a bunch of simulation datasets,
     and save the results to a file. Basically a wrapper of Hypersurface.fit, handling common pre-fitting tasks
@@ -1407,7 +1424,8 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
         # Create the hypersurface
         hypersurface = Hypersurface( 
             params=copy.deepcopy(params),
-            initial_intercept=1., # Initial value for intercept
+            initial_intercept=0. if log else 1., # Initial value for intercept
+            log=log
         )
 
         # Perform fit
