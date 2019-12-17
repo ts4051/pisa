@@ -530,7 +530,7 @@ class Hypersurface(object) :
             normed_maps = []
             for m in maps :
                 norm_m = copy.deepcopy(m)
-                norm_m.hist[finite_mask] = norm_m.hist[finite_mask] / nominal_map.hist[finite_mask]
+                norm_m.hist[finite_mask] = norm_m.hist[finite_mask] / unp.nominal_values(nominal_map.hist[finite_mask])
                 norm_m.hist[~finite_mask] = ufloat(np.NaN, np.NaN)
                 normed_maps.append(norm_m)
 
