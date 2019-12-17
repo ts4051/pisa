@@ -180,9 +180,13 @@ class Hypersurface(object) :
 
     initial_intercept : float
         Starting point for the hypersurface intercept in any fits
+    
+    log : bool, optional
+        Set hypersurface to log mode. The surface is fit to the log of the bin counts.
+        The fitted surface is exponentiated during evaluation. Default: False
     '''
 
-    def __init__(self, params, initial_intercept=None, log=True):
+    def __init__(self, params, initial_intercept=None, log=False):
 
         # Store args
         self.initial_intercept = initial_intercept
