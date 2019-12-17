@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Calculates the differentials for Jacobian matrix wrt. particle
 # production uncertainty.
 #
@@ -8,12 +9,9 @@
 
 import os, sys, gzip, bz2, collections
 import numpy as np
-import cPickle as pickle
+import pickle
 
 from scipy.interpolate import RectBivariateSpline
-
-sys.path.append('../../../../../MCEq/MCEq')
-#sys.path.append('calculations')
 
 #import solver related modules
 from MCEq.core import MCEqRun
@@ -89,7 +87,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     mceq_run.unset_mod_pprod(dont_fill=False)
 
     barr_pars = [p for p in barr if p.startswith(barr_param) and 'ch' not in p]
-    print 'Parameters corresponding to selection', barr_pars
+    print('Parameters corresponding to selection', barr_pars)
     dim_res = len(zenith_list), etr.shape[0]
     gs = mceq_run.get_solution
     unit=1e4
@@ -177,11 +175,12 @@ if __name__ == '__main__':
     assert issubclass(CRModel,pm.PrimaryFlux), "Unknown primary cosmic ray spectrum model"
 
     # define CR model parameters
-    if args.cosmic_ray_model=="HillasGaisser2012": CR_vers = "H3a"
-    elif args.cosmic_ray_model=="GaisserStanevTilav": CR_vers = "4-gen"
-    else: CR_vers=None
-
-    idjob = 0  # int(os.path.expandvars('$SGE_TASK_ID')) - 1
+    if args.cosmic_ray_model=="HillasGaisser2012": 
+        CR_vers = "H3a"
+    elif args.cosmic_ray_model=="GaisserStanevTilav": 
+        CR_vers = "4-gen"
+    else: 
+        CR_vers = None
 
     mceq_run = MCEqRun(
         #provide the string of the interaction model

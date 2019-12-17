@@ -13,7 +13,7 @@ from __future__ import absolute_import, print_function, division
 import math, collections
 import numpy as np
 from numba import guvectorize, cuda
-import cPickle as pickle
+import pickle
 from bz2 import BZ2File
 from scipy.interpolate import RectBivariateSpline
 
@@ -336,9 +336,13 @@ class pi_mceq_barr(PiStage):
         #TODO Can I directly write to the original array, will be faster
         np.copyto( src=result, dst=out )
 
-    def antipion_production(self, barr_var, pion_ratio):
 
+    def antipion_production(self, barr_var, pion_ratio):
+        '''
+        Combine pi+ param and pi+/pi- ratio to get pi- param
+        '''
         return ((1 + barr_var)/(1 + pion_ratio)) - 1
+
 
     @profile
     def compute_function(self):
