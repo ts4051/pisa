@@ -31,7 +31,7 @@ class pi_mceq_barr(PiStage):
 
     Paramaters
     ----------
-    table_file : directory of pre-generated tables from MCEq
+    table_file : pickle file containing pre-generated tables from MCEq
 
     params : ParamSet
     	Must exclusively have parameters: 
@@ -231,7 +231,7 @@ class pi_mceq_barr(PiStage):
         Have splines for each Barr parameter, plus +/- versions of each 
         Barr parameter corresponding to mesons/antimesons.
 
-        For a give Barr parameter, an underlying dictionary have the following keywords: 
+        For a given Barr parameter, an underlying dictionary have the following keywords: 
             "numu", "numubar", "nue", "nuebar"
             derivatives: "dnumu", "dnumubar", "dnue", dnuebar"
         Units are changed to m^-2 in creates_splines.., rather than cm^2 which is the unit of calculation in MCEq
@@ -241,13 +241,15 @@ class pi_mceq_barr(PiStage):
         '''
 
         # Load the MCEq splines
-        self.spline_tables_dict = pickle.load( BZ2File( find_resource(self.table_file) ) )
+        spline_file = find_resource(self.table_file)
+        logging.info("Loading MCEq spline tables from : %s" % spline_file)
+        self.spline_tables_dict = pickle.load( BZ2File(spline_file), encoding="latin1" ) # Encoding is to support pickle files created with python v2
 
         # Loop over containers
         for container in self.data :
 
             # Grab containers here once to save time
-            true_log_energy = np.log( container["true_energy"].get("host") ) #TODO store splines directly in terms of energy, not log energy
+            true_log_energy = np.log( container["true_energy"].get("host") ) #TODO make splien generation script store splines directly in terms of energy, not ln(energy)
             true_abs_coszen = np.abs( container["true_coszen"].get("host") )
             nu_flux_nominal = container["nu_flux_nominal"].get("host")
             gradients = container["gradients"].get("host")
@@ -298,7 +300,7 @@ class pi_mceq_barr(PiStage):
             # Once again, need to correctly map nu/nubar and flavor to the output arrays
 
             # Loop over parameters
-            for gradient_param_name,gradient_param_idx in self.gradient_param_indices.items() :
+            for gradient_param_name, gradient_param_idx in self.gradient_param_indices.items() :
 
                 # nue(bar)
                 self._eval_spline( 
@@ -357,10 +359,8 @@ class pi_mceq_barr(PiStage):
         delta_index = self.params.delta_index.value.m_as("dimensionless")
         energy_pivot = self.params.energy_pivot.value.m_as("GeV")
 
-        # User variants of Barr parameterisation
-        pion_ratio = self.params.pion_ratio.value.m_as('dimensionless')
-
         # pions
+        pion_ratio = self.params.pion_ratio.value.m_as('dimensionless')
         barr_a_Pi = self.params.barr_a_Pi.value.m_as('dimensionless')
         barr_b_Pi = self.params.barr_b_Pi.value.m_as('dimensionless')
         barr_c_Pi = self.params.barr_c_Pi.value.m_as('dimensionless')
@@ -370,6 +370,8 @@ class pi_mceq_barr(PiStage):
         barr_g_Pi = self.params.barr_g_Pi.value.m_as('dimensionless')
         barr_h_Pi = self.params.barr_h_Pi.value.m_as('dimensionless')
         barr_i_Pi = self.params.barr_i_Pi.value.m_as('dimensionless')
+        #TODO also have indepednent priors on antipion params?
+
         #kaons
         barr_w_K = self.params.barr_w_K.value.m_as('dimensionless')
         barr_x_K = self.params.barr_x_K.value.m_as('dimensionless')
