@@ -1,11 +1,14 @@
-from __future__ import print_function
 # Calculates the differentials for Jacobian matrix wrt. particle
 # production uncertainty.
 #
 # Author: Anatoli Fedynitch
 # August 2017
 #
+# Update for IceCube oscillation analyss by Ida Storehaug & Tom Stuttard (2019)
+# See https://github.com/afedynitch/MCEq/blob/master/examples/KPi_demonstration.ipynb for a related example
+#
 
+from __future__ import print_function
 
 import os, sys, gzip, bz2, collections
 import numpy as np
@@ -13,13 +16,10 @@ import pickle
 
 from scipy.interpolate import RectBivariateSpline
 
-#import solver related modules
 from MCEq.core import MCEqRun
 from MCEq.misc import normalize_hadronic_model_name
-from mceq_config import config, mceq_config_without
-
-#import primary model choices
-import CRFluxModels as pm
+from mceq_config import config
+import crflux.models as crf
 
 # Global Barr parameter table
 # format (x_min, x_max, E_min, E_max) | x is x_lab= E_pi/E, E projectile-air interaction energy
@@ -109,7 +109,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for p in barr_pars:
         mceq_run.set_mod_pprod(primary_particle, pid, barr_unc, (p, delta))        
 
-    mceq_run._init_default_matrices(skip_D_matrix=True)
+    mceq_run.regenerate_matrices(skip_decay_matrix=True)
 
     numu_up, anumu_up, nue_up, anue_up = (np.zeros(dim_res), np.zeros(dim_res),
                                           np.zeros(dim_res), np.zeros(dim_res))
@@ -126,7 +126,7 @@ def compute_abs_derivatives(mceq_run, pid, barr_param, zenith_list):
     for p in barr_pars:
         mceq_run.set_mod_pprod(primary_particle, pid, barr_unc, (p, -delta))
 
-    mceq_run._init_default_matrices(skip_D_matrix=True)
+    mceq_run.regenerate_matrices(skip_decay_matrix=True)
 
     numu_down, anumu_down, nue_down, anue_down = (np.zeros(dim_res),
                                                   np.zeros(dim_res),
@@ -170,9 +170,9 @@ if __name__ == '__main__':
     interaction_model = normalize_hadronic_model_name(args.interaction_model)
 
     # Get primary cosmic ray spectrum model
-    assert hasattr(pm,args.cosmic_ray_model), "Unknown primary cosmic ray spectrum model"
-    CRModel = getattr(pm,args.cosmic_ray_model) # Gettting class (NOT instantiating)
-    assert issubclass(CRModel,pm.PrimaryFlux), "Unknown primary cosmic ray spectrum model"
+    assert hasattr(crf, args.cosmic_ray_model), "Unknown primary cosmic ray spectrum model"
+    CRModel = getattr(crf, args.cosmic_ray_model) # Gettting class (NOT instantiating)
+    assert issubclass(CRModel, crf.PrimaryFlux), "Unknown primary cosmic ray spectrum model"
 
     # define CR model parameters
     if args.cosmic_ray_model=="HillasGaisser2012": 
@@ -222,9 +222,9 @@ if __name__ == '__main__':
     angles = np.arccos(cos_theta) / np.pi * 180.
 
     # Report settings
-    print "Running with :"
-    print "  Interaction model : %s" % interaction_model
-    print "  Primary cosmic ray spectrum model : %s" % args.cosmic_ray_model
+    print("Running with :")
+    print("  Interaction model : %s" % interaction_model)
+    print("  Primary cosmic ray spectrum model : %s" % args.cosmic_ray_model)
 
     # Some technical shortcuts
     solution = {}
