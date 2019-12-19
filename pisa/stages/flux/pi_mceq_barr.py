@@ -10,7 +10,7 @@ Tom Stuttard, Ida Storehaug, Philipp Eller, Summer Blot
 """
 from __future__ import absolute_import, print_function, division
 
-import math, collections
+import math, collections, copy
 import numpy as np
 from numba import guvectorize, cuda
 import pickle
@@ -359,60 +359,35 @@ class pi_mceq_barr(PiStage):
         delta_index = self.params.delta_index.value.m_as("dimensionless")
         energy_pivot = self.params.energy_pivot.value.m_as("GeV")
 
-        # pions
+        # Grab the pion ratio
         pion_ratio = self.params.pion_ratio.value.m_as('dimensionless')
-        barr_a_Pi = self.params.barr_a_Pi.value.m_as('dimensionless')
-        barr_b_Pi = self.params.barr_b_Pi.value.m_as('dimensionless')
-        barr_c_Pi = self.params.barr_c_Pi.value.m_as('dimensionless')
-        barr_d_Pi = self.params.barr_d_Pi.value.m_as('dimensionless')
-        barr_e_Pi = self.params.barr_e_Pi.value.m_as('dimensionless')
-        barr_f_Pi = self.params.barr_f_Pi.value.m_as('dimensionless')
-        barr_g_Pi = self.params.barr_g_Pi.value.m_as('dimensionless')
-        barr_h_Pi = self.params.barr_h_Pi.value.m_as('dimensionless')
-        barr_i_Pi = self.params.barr_i_Pi.value.m_as('dimensionless')
-        #TODO also have indepednent priors on antipion params?
-
-        #kaons
-        barr_w_K = self.params.barr_w_K.value.m_as('dimensionless')
-        barr_x_K = self.params.barr_x_K.value.m_as('dimensionless')
-        barr_y_K = self.params.barr_y_K.value.m_as('dimensionless')
-        barr_z_K = self.params.barr_z_K.value.m_as('dimensionless')
-        barr_w_antiK = self.params.barr_w_antiK.value.m_as('dimensionless')
-        barr_x_antiK = self.params.barr_x_antiK.value.m_as('dimensionless')
-        barr_y_antiK = self.params.barr_y_antiK.value.m_as('dimensionless')
-        barr_z_antiK = self.params.barr_z_antiK.value.m_as('dimensionless')
 
         # Map the user parameters into the Barr +/- params
         # pi- production rates is restricted by the pi-ratio, just as in arXiv:0611266
+        #TODO might want dedicated priors for pi- params (but without corresponding free params)
         gradient_params_mapping = collections.OrderedDict()
-        gradient_params_mapping["a+"] = barr_a_Pi
-        gradient_params_mapping["a-"] = self.antipion_production(barr_a_Pi, pion_ratio)
-        gradient_params_mapping["b+"] = barr_b_Pi
-        gradient_params_mapping["b-"] = self.antipion_production(barr_b_Pi, pion_ratio)
-        gradient_params_mapping["c+"] = barr_c_Pi
-        gradient_params_mapping["c-"] = self.antipion_production(barr_c_Pi, pion_ratio)
-        gradient_params_mapping["d+"] = barr_d_Pi
-        gradient_params_mapping["d-"] = self.antipion_production(barr_d_Pi, pion_ratio)
-        gradient_params_mapping["e+"] = barr_e_Pi
-        gradient_params_mapping["e-"] = self.antipion_production(barr_e_Pi, pion_ratio)
-        gradient_params_mapping["f+"] = barr_f_Pi
-        gradient_params_mapping["f-"] = self.antipion_production(barr_f_Pi, pion_ratio)
-        gradient_params_mapping["g+"] = barr_g_Pi
-        gradient_params_mapping["g-"] = self.antipion_production(barr_g_Pi, pion_ratio)
-        gradient_params_mapping["h+"] = barr_h_Pi
-        gradient_params_mapping["h-"] = self.antipion_production(barr_h_Pi, pion_ratio)
-        gradient_params_mapping["i+"] = barr_i_Pi
-        gradient_params_mapping["i-"] = self.antipion_production(barr_i_Pi, pion_ratio)
-        #kaons
+        gradient_params_mapping["a+"] = self.params.barr_a_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["b+"] = self.params.barr_b_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["c+"] = self.params.barr_c_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["d+"] = self.params.barr_d_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["e+"] = self.params.barr_e_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["f+"] = self.params.barr_f_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["g+"] = self.params.barr_g_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["h+"] = self.params.barr_h_Pi.value.m_as('dimensionless')
+        gradient_params_mapping["i+"] = self.params.barr_i_Pi.value.m_as('dimensionless')
+        for k in list(gradient_params_mapping.keys()) :
+            gradient_params_mapping[k.replace("+","-")] = self.antipion_production(gradient_params_mapping[k], pion_ratio)
+
+        # kaons
         # as the kaon ratio is unknown, K- production is not restricted
-        gradient_params_mapping["w+"] = barr_w_K
-        gradient_params_mapping["w-"] = barr_w_antiK
-        gradient_params_mapping["x+"] = barr_x_K
-        gradient_params_mapping["x-"] = barr_x_antiK
-        gradient_params_mapping["y+"] = barr_y_K
-        gradient_params_mapping["y-"] = barr_y_antiK
-        gradient_params_mapping["z+"] = barr_z_K
-        gradient_params_mapping["z-"] = barr_z_antiK
+        gradient_params_mapping["w+"] = self.params.barr_w_K.value.m_as('dimensionless')
+        gradient_params_mapping["w-"] = self.params.barr_w_antiK.value.m_as('dimensionless')
+        gradient_params_mapping["x+"] = self.params.barr_x_K.value.m_as('dimensionless')
+        gradient_params_mapping["x-"] = self.params.barr_x_antiK.value.m_as('dimensionless')
+        gradient_params_mapping["y+"] = self.params.barr_y_K.value.m_as('dimensionless')
+        gradient_params_mapping["y-"] = self.params.barr_y_antiK.value.m_as('dimensionless')
+        gradient_params_mapping["z+"] = self.params.barr_z_K.value.m_as('dimensionless')
+        gradient_params_mapping["z-"] = self.params.barr_z_antiK.value.m_as('dimensionless')
 
         # Populate array Barr param array
         for gradient_param_name,gradient_param_idx in self.gradient_param_indices.items() :
@@ -440,14 +415,13 @@ class pi_mceq_barr(PiStage):
                 self.gradient_params,
                 out=container['nu_flux'].get(WHERE),
             )
+            container['nu_flux'].mark_changed(WHERE)
 
             # Check for negative results from spline
-            negative_mask = container['nu_flux'].get(WHERE) < 0
+            negative_mask = container['nu_flux'].get("host") < 0
             if np.sum(negative_mask) :
-                container['nu_flux'].get(WHERE)[negative_mask] = 0.
-
-            # Mark as changed
-            container['nu_flux'].mark_changed(WHERE)
+                container['nu_flux'].get("host")[negative_mask] = 0.
+            container['nu_flux'].mark_changed("host")
 
 
 @myjit
