@@ -19,14 +19,11 @@ class grid(PiStage):
     Paramaters
     ----------
 
-    n_events : int
-        Number of events to be generated per output name
+    input_specs : MultiDimBinning
+        Binning object defining the grid to be generated
 
-    seed : int
-        Seed to be used for random
-
-    Notes
-    -----
+    entity : str
+        `entity` arg to be passed to `MultiDimBinning.meshgrid` (see that fucntion docs for details)
 
     """
     def __init__(self,
@@ -38,6 +35,7 @@ class grid(PiStage):
                  input_specs=None,
                  calc_specs=None,
                  output_specs=None,
+                 entity="midpoints",
                 ):
 
         expected_params = ()
@@ -45,6 +43,9 @@ class grid(PiStage):
         input_apply_keys = ('initial_weights',
                            'weights',
                            )
+
+        # store args
+        self.entity = entity
 
         # init base class
         super(grid, self).__init__(data=data,
@@ -83,7 +84,7 @@ class grid(PiStage):
                 flav = 2
 
             # Create arrays
-            mesh = self.input_specs.meshgrid(entity="midpoints",attach_units=False) #TODO make "entity" a param
+            mesh = self.input_specs.meshgrid(entity=self.entity, attach_units=False)
             size = mesh[0].size
             for var_name,var_vals in zip(self.input_specs.names,mesh) :
                 container.add_array_data( var_name, var_vals.flatten().astype(FTYPE) )
