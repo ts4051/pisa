@@ -120,12 +120,25 @@ def exponential_hypersurface_func(p,a,b,out) :
     result = a * np.exp(b*p)
     np.copyto(src=result,dst=out)
 
+def logarithmic_hypersurface_func(p, m, out):
+    '''
+    Logarithmic hypersurface functional form
+    
+    f(p) = log(1 + mp)
+    
+    Allows the fit of an effectively linear multiplicative
+    function while in logmode, since:
+    exp(log(1 + mp) + h) = (1 + mp) exp(h)
+    '''
+    result = np.log(1 + m*p)
+    np.copyto(src=result,dst=out)
 
 # Container holding all possible functions
 HYPERSURFACE_PARAM_FUNCTIONS = collections.OrderedDict()
 HYPERSURFACE_PARAM_FUNCTIONS["linear"] = linear_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["quadratic"] = quadratic_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["exponential"] = exponential_hypersurface_func
+HYPERSURFACE_PARAM_FUNCTIONS["logarithmic"] = logarithmic_hypersurface_func
 
 '''
 Core hypersurface classes
@@ -1759,7 +1772,7 @@ def _load_hypersurfaces_data_release(input_file_prototype, binning) :
 Plotting
 '''
 
-def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None, show_nominal=False) :
+def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None, show_nominal=False, show_offaxis=True, show_zero=False) :
     '''
     Plot the hypersurface for a given bin, in 1D w.r.t. to a single specified parameter.
     Plots the following:
@@ -1805,13 +1818,33 @@ def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None,
 
     # Define a mask for selecting on-axis points only
     on_axis_mask = hypersurface.get_on_axis_mask(param.name)
+    include_mask = np.ones_like(on_axis_mask) if show_zero else (np.asarray(chosen_bin_values) > 0.)
 
     # Plot the points from the datasets used for fitting
-    x = np.asarray(param.fit_param_values)[on_axis_mask]
-    y = np.asarray(chosen_bin_values)[on_axis_mask]
-    yerr = np.asarray(chosen_bin_sigma)[on_axis_mask]
+    x = np.asarray(param.fit_param_values)[on_axis_mask & include_mask]
+    y = np.asarray(chosen_bin_values)[on_axis_mask & include_mask]
+    yerr = np.asarray(chosen_bin_sigma)[on_axis_mask & include_mask]
+
     ax.errorbar( x=x, y=y, yerr=yerr, marker="o", color=("black" if color is None else color), linestyle="None", label=label )
 
+    # Plot off-axis points by projecting them along the fitted surface on the axis. 
+    if show_offaxis:
+        x = np.asarray(param.fit_param_values)
+        y = np.asarray(chosen_bin_values)
+        yerr = np.asarray(chosen_bin_sigma)
+        prediction = hypersurface.evaluate(hypersurface.fit_param_values, bin_idx=bin_idx)
+        params_for_projection = {param.name: x}
+        for p in list(hypersurface.params.values()) :
+            if p.name != param.name :
+                params_for_projection[p.name] = np.full_like(x, hypersurface.nominal_values[p.name])
+        prediction_on_axis = hypersurface.evaluate(params_for_projection, bin_idx=bin_idx)
+        y_projected = y - prediction + prediction_on_axis
+        ax.errorbar(x=x[~on_axis_mask & include_mask],
+                    y=y_projected[~on_axis_mask & include_mask],
+                    yerr=yerr[~on_axis_mask & include_mask],
+                    marker="o", color=("black" if color is None else color), linestyle="None",
+                    alpha=0.5,
+                   )
     # Plot the hypersurface
     # Generate as bunch of values along the sys param axis to make the plot
     # Then calculate the hypersurface value at each point, using the nominal values for all other sys params
@@ -1822,6 +1855,7 @@ def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None,
             params_for_plot[p.name] = np.full_like(x_plot,hypersurface.nominal_values[p.name])
     y_plot = hypersurface.evaluate(params_for_plot,bin_idx=bin_idx)
     ax.plot( x_plot, y_plot, color=("red" if color is None else color) )
+    
 
     #TODO Add fit uncertainty. Problem using uarrays with np.exp at the minute, may need to shift to bin-wise calc...
     # ax.fill_between( curve_x[i,:], unp.nominal_values(y_opt)-unp.std_devs(y_opt), unp.nominal_values(y_opt)+unp.std_devs(y_opt), color='red', alpha=0.2 )
