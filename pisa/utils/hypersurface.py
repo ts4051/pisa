@@ -2054,7 +2054,159 @@ def plot_bin_fits_2d(ax, hypersurface, bin_idx, param_names ) :
 #
 # Test/example
 #
-
+def generate_asimov_testdata(binning, parameters, true_param_coeffs,
+                             nominal_param_values, sys_param_values,
+                             error_scale=0.1, log=False,
+                            ):
+    hypersurface = Hypersurface( 
+        params=parameters, # Specify the systematic parameters
+        initial_intercept=1., # Intercept value (or first guess for fit)
+        log=log,
+    )
+    assert set(hypersurface.params.keys()) == set(nominal_param_values.keys())
+    assert set(hypersurface.params.keys()) == set(true_param_coeffs.keys())
+    
+    hypersurface._init(binning=binning, nominal_param_values=nominal_param_values)
+    from pisa.core.map import Map, MapSet
+    for bin_idx in np.ndindex(binning.shape):
+        for name, coeffs in true_param_coeffs.items():
+            assert len(coeffs) == hypersurface.params[name].num_fit_coeffts, "number of coefficients in the parameter must match"
+            for j, c in enumerate(coeffs):
+                idx = hypersurface.params[name].get_fit_coefft_idx(bin_idx=bin_idx, coefft_idx=j)
+                hypersurface.params[name].fit_coeffts[idx] = c 
+    logging.info("Truth hypersurface report:\n%s" % str(hypersurface))
+    
+    # Only consider one particle type for simplicity
+    particle_key = "nue_cc"
+    # Create each dataset, e.g. set the systematic parameter values, calculate a bin count
+    hist = hypersurface.evaluate(nominal_param_values)
+    assert np.all(hist >= 0.), "nominal map has negative values! Choose different true parameters."
+    nom_map = Map(name=particle_key, binning=binning, hist=hist, error_hist=np.sqrt(hist)*error_scale)
+    logging.info("Nominal hist: \n%s" % str(nom_map.hist))
+    sys_maps = []
+    for i in range(len(sys_param_values)):
+        hist = hypersurface.evaluate(sys_param_values[i])
+        assert np.all(hist > 0.), "a systematic map has negative values! values: %s systematics: %s" % (str(hist), str(sys_param_values[i]))
+        sys_maps.append(Map(name=particle_key, binning=binning, hist=hist, error_hist=np.sqrt(hist)*error_scale))
+        # logging.info("Systematic params: \n%s" % str(sys_param_values[i]))
+        # logging.info("Systematic hist: \n%s" % str(sys_maps[-1].hist))
+    return nom_map, sys_maps
+    
+def test_hypersurface_uncertainty():
+    '''
+    Simple test of hypersurface fits + uncertainty
+    1. Creates some Asimov test data matching a true hypersurface and checks the ability
+       to fit back the truth.
+    2. Fluctuates Asimov test data randomly to check uncertainties claimed by hypersurface
+    '''
+    # Define systematic parameters in the hypersurface
+    params = [
+        HypersurfaceParam(name="foo", func_name="linear", initial_fit_coeffts=[1.],),
+        HypersurfaceParam(name="bar", func_name="quadratic", initial_fit_coeffts=[1., -1.],),
+    ]
+    # Create the hypersurface
+    hypersurface = Hypersurface( 
+        params=params, # Specify the systematic parameters
+        initial_intercept=1., # Intercept value (or first guess for fit)
+        log=True
+    )
+    from pisa.core.map import Map, MapSet
+    # Define binning with one dummy bin
+    binning = MultiDimBinning([OneDimBinning(name="reco_energy", domain=[0.,10.], num_bins=1, units=ureg.GeV,is_lin=True)])
+    # Define true coefficients
+    true_coeffs = {'foo': [0.4], 'bar': [0.2, -0.1]}
+    nominal_param_values = {'foo': 1., 'bar': 0.}
+    # making combinations of systematic values
+    foo_vals = np.linspace(-1., 2., 6)
+    bar_vals = np.linspace(-.5, 0.5, 5)
+    sys_param_values = []
+    for f in foo_vals:
+        for b in bar_vals:
+            sys_param_values.append({'foo': f, 'bar': b})
+    
+    nom_map, sys_maps = generate_asimov_testdata(binning,
+                                                 params,
+                                                 true_coeffs,
+                                                 nominal_param_values,
+                                                 sys_param_values,
+                                                 log=True
+                                                )
+    # Perform fit
+    hypersurface.fit(
+        nominal_map=nom_map,
+        nominal_param_values=nominal_param_values,
+        sys_maps=sys_maps,
+        sys_param_values=sys_param_values,
+        norm=False,
+    )
+    # Report the results
+    logging.info("Fitted hypersurface report:\n%s" % hypersurface)
+    # Evaluate hypersurface and uncertainties at some points
+    # that just happen to be the systematic values (but choice could be different)
+    asimov_true_points = []
+    asimov_fit_points = []
+    asimov_fit_errs = []
+    for i in range(len(sys_param_values)):
+        hist, errs = hypersurface.evaluate(sys_param_values[i], return_uncertainty=True)
+        asimov_fit_points.append(hist)
+        asimov_fit_errs.append(errs)
+        asimov_true_points.append(sys_maps[i].nominal_values)
+    asimov_true_points = np.concatenate(asimov_true_points)
+    asimov_fit_points = np.concatenate(asimov_fit_points)
+    asimov_fit_errs = np.concatenate(asimov_fit_errs)
+    logging.info("Asimov true points:\n%s" % str(asimov_true_points))
+    logging.info("Asimov fit points:\n%s" % str(asimov_fit_points))
+    logging.info("Asimov fit errors:\n%s" % str(asimov_fit_errs))
+    logging.info("Fluctuating maps and re-fitting...")
+    # do several rounds of fluctuation, re-fit and storage of results
+    n_rounds = 100
+    fluctuated_fit_points = []
+    for i in range(n_rounds):
+        #logging.info("Round %d/%d" % (i+1, n_rounds))
+        nom_map_fluct = nom_map.fluctuate(method='gauss')
+        sys_maps_fluct = []
+        for s in sys_maps:
+            sys_maps_fluct.append(s.fluctuate(method='gauss'))
+        hypersurface.fit(
+            nominal_map=nom_map_fluct,
+            nominal_param_values=nominal_param_values,
+            sys_maps=sys_maps_fluct,
+            sys_param_values=sys_param_values,
+            norm=False,
+        )
+        fluctuated_fit_points.append([])
+        for j in range(len(sys_param_values)):
+            hist = hypersurface.evaluate(sys_param_values[j], return_uncertainty=False)
+            fluctuated_fit_points[-1].append(hist)
+        fluctuated_fit_points[-1] = np.concatenate(fluctuated_fit_points[-1])
+        logging.debug("Fluctuated fit points:\n%s" % str(fluctuated_fit_points[-1]))
+    # evaluate whether the actual fluctuations match the estimated errors
+    fluctuated_fit_points = np.array(fluctuated_fit_points)
+    fit_differences = fluctuated_fit_points - asimov_fit_points
+    all_pulls = fit_differences / asimov_fit_errs
+    avg_fit_differences = np.mean(fit_differences, axis=0)
+    mean_fluctuated_fits = np.mean(fluctuated_fit_points, axis=0)
+    std_fluctuated_fits = np.std(fluctuated_fit_points, axis=0)
+    std_pulls = np.std(all_pulls, axis=0)
+    logging.info("Average fluctuated fit difference:\n%s" % str(avg_fit_differences))
+    #logging.info("Average fluctuated fit points:\n%s" % str(mean_fluctuated_fits))
+    #logging.info("Fluctuated fit standard deviations:\n%s" % str(std_fluctuated_fits))
+    # pulls = np.mean(all_pulls, axis=0)
+    logging.info("Mean pulls per point:\n%s" % str(std_pulls))
+    logging.info("Mean pull: %.3f" % np.mean(std_pulls))
+    # plotting
+    
+    import matplotlib.pyplot as plt
+    plt.figure()
+    plt.hist(all_pulls.flatten(), bins=50, density=True, label='fluctuated fits')
+    x_plot = np.linspace(-4, 4, 100)
+    plt.plot(x_plot, np.exp(-x_plot**2/2.)/np.sqrt(2.*np.pi), label='expectation')
+    plt.title('pull distribution')
+    plt.xlabel('pull')
+    plt.ylabel('density')
+    plt.legend()
+    plt.savefig('test_hypersurface_pull.pdf')
+    
 def hypersurface_example() :
     '''
     Simple hypersurface example covering:
