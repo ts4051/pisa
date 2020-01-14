@@ -12,6 +12,7 @@ from pisa.core.pi_stage import PiStage
 from pisa.utils import vectorizer
 from pisa.utils.profiler import profile
 from pisa.core.container import Container
+from pisa.utils.resources import find_resource
 
 
 class csv_loader(PiStage):
@@ -80,7 +81,7 @@ class csv_loader(PiStage):
 
     def setup_function(self):
 
-        raw_data = pd.read_csv(self.events_file)
+        raw_data = pd.read_csv( find_resource(self.events_file) )
 
         # create containers from the events
         for name in self.output_names:
@@ -88,6 +89,8 @@ class csv_loader(PiStage):
             # make container
             container = Container(name)
             container.data_specs = self.input_specs
+
+            # get particle ID
             nubar = -1 if 'bar' in name else 1
             if 'e' in name:
                 flav = 0
@@ -95,28 +98,45 @@ class csv_loader(PiStage):
                 flav = 1
             if 'tau' in name:
                 flav = 2
-
-            # cut out right part
             pdg = nubar * (12 + 2 * flav)
 
+            # build a mask for this flavor-interction combination
+            # handling backwards compatiblity (DeepCore vs Upgrade releases)
             mask = raw_data['pdg'] == pdg
-            if 'cc' in name:
-                mask = np.logical_and(mask, raw_data['type'] > 0)
-            else:
-                mask = np.logical_and(mask, raw_data['type'] == 0)
+            if "current_type" in raw_data :
+                mask = np.logical_and(mask, raw_data['current_type'] == (0 if name.endswith("nc") else 1) ) #TODO Handle both cases
+            elif "interaction" in raw_data :
+                if 'cc' in name:
+                    mask = np.logical_and(mask, raw_data['type'] > 0)
+                else:
+                    mask = np.logical_and(mask, raw_data['type'] == 0)
+            else :
+                raise IOError("Could not determine NC vs CC from events in this input file")
 
             events = raw_data[mask]
 
+            # Get the variables
             container['weighted_aeff'] = events['weight'].values.astype(FTYPE)
             container['weights'] = np.ones(container.array_length, dtype=FTYPE)
             container['initial_weights'] = np.ones(container.array_length, dtype=FTYPE)
             container['true_energy'] = events['true_energy'].values.astype(FTYPE)
-            container['true_coszen'] = events['true_coszen'].values.astype(FTYPE)
-            container['reco_energy'] = events['reco_energy'].values.astype(FTYPE)
-            container['reco_coszen'] = events['reco_coszen'].values.astype(FTYPE)
+            container['true_coszen'] = events['true_coszen'].values.astype(FTYPE) if "true_coszen" in events else np.cos(events['true_zenith'].values.astype(FTYPE))
+            container['reco_coszen'] = events['reco_coszen'].values.astype(FTYPE) if "reco_coszen" in events else np.cos(events['reco_zenith'].values.astype(FTYPE))
             container['pid'] = events['pid'].values.astype(FTYPE)
             container.add_scalar_data('nubar', nubar)
             container.add_scalar_data('flav', flav)
+
+            # azimuth is optional
+            if 'true_azimuth' in events :
+                container['true_azimuth'] = events['true_azimuth'].values.astype(FTYPE)
+                container['reco_azimuth'] = events['reco_azimuth'].values.astype(FTYPE)
+
+            # inelasticity is optional
+            assert not ( ("inelasticity" in events) and ("y" in events) ), "Found inelasticity twice"
+            if "inelasticity" in events :
+                container['inelasticity'] = events['inelasticity'].values.astype(FTYPE)
+            elif "y" in events :
+                container['inelasticity'] = events['y'].values.astype(FTYPE)
 
             self.data.add_container(container)
 
