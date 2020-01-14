@@ -119,7 +119,7 @@ def logistic_function(a,b,c,x) :
 def has_muon(particle_key) :
     '''
     Function returning True if the particle type has muons in the final state
-    This is numu CC and atmopsheric muons
+    This is numu CC
 
     Parameters
     ----------
@@ -135,15 +135,216 @@ def has_muon(particle_key) :
 
     #TODO consider adding nutau CC where the tau decays to muons
 
-    return ( (particle_key.startswith("numu") and particle_key.endswith("_cc")) or particle_key.startswith("muon") )
+    return ( particle_key.startswith("numu") and particle_key.endswith("_cc") )
 
 
 
-def visible_energy_correction(particle_key, true_energy, inelasticity=None, tau_lepton_energy=None) :
+
+def wrap_in_two_pi(angle) :
     '''
+    Wrap an array of angles such that all values are within [0, 2pi]
     '''
+
+    two_pi = 2. * np.pi
+
+    while True :
+
+        lt_mask = angle < 0
+        if lt_mask.sum() > 0 :
+            angle[lt_mask] += two_pi
+
+        gt_mask = angle > two_pi
+        if gt_mask.sum() > 0 :
+            angle[gt_mask] -= two_pi
+        
+        if (lt_mask.sum() == 0) and (gt_mask.sum() == 0) :
+            break
+
+    return angle
+
+
+def apply_rotational_bounds(zenith, azimuth) :
+    '''
+    Apply rotational bounds to an array of directions, defined by zenith and azimuth angles.
+    Coord system definition: http://software.icecube.wisc.edu/documentation/projects/dataclasses/i3direction.html
+    '''
+
+    #
+    # zenith
+    #
+
+    # zenith is defined in range [0, pi]
+    # Extending bey_originnd zenith range requires a change in azimuth
+
+    # First, get into [0,2pi] range
+    zenith = wrap_in_two_pi(zenith)
+
+    # Next, enforce [0,pi] range by ading pi rotation to azimuth for zenith in [pi,2pi]
+    while True :
+        mask = zenith > np.pi
+        if mask.sum() :
+            zenith[mask] = np.pi - (zenith[mask] - np.pi)
+            azimuth[mask] += np.pi
+        else :
+            break
+
+    #
+    # azimuth
+    #
+
+    # Azimuth is undefined for completely up/down-going particles
+    #TODO
+
+    # Wrap azimuth into [0, 2pi]
+    azimuth = wrap_in_two_pi(azimuth)
+
+    return zenith, azimuth
+
+
+def rotation_matrix_between_vectors(a, b) :
+    '''
+    Get rotation martrix between two vectors
+    '''
+
+    from scipy.spatial.transform import Rotation
+
+    assert a.shape == (3,)
+    assert b.shape == (3,)
+
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+
+    angle = np.arccos( np.dot(a, b) )
+
+    axis = np.cross(a,b)
+    axis /= np.linalg.norm(axis)
+
+    # return Rotation.from_dcm( rotation_matrix_axis_angle(axis, angle) )
+    # return Rotation.from_euler(axis, angle)
+    return Rotation.from_rotvec( axis * angle )
+
+
+def smear_cartesian_direction(d, sigma, random_state) :
+    '''
+    Apply Gaussian smearing (e.g. resolution effects) to a Cartesian direction vector
+
+    d = [x, y, z]
+    '''
+
+    from scipy.spatial.transform import Rotation
+
+    assert d.shape == (3,)
+    assert np.isscalar(sigma)
+
+    # Generate a new direction with an angle draw from a Gaussian distribution
+    # It is randomly oriented around the original vector, e.g. somewhere on a cone
+    # First define this relative to the z axis
+    # This can be thought of as the delta/error (which has nt yet been applied to the original valie)
+    z_axis = np.array([0., 0., 1.])
+    smearing_rotation = Rotation.from_euler("xz", [random_state.normal(0., sigma), random_state.uniform(0., 2.*np.pi)])
+    smeared_wrt_z = smearing_rotation.apply(z_axis)
+
+    # Now transform this vector to the original direction
+    # e.g. undo the assumption of originally lying along the z axis
+    direction_rotation = rotation_matrix_between_vectors(z_axis, d/np.linalg.norm(d))
+    smeared = direction_rotation.apply(smeared_wrt_z)
+
+    return smeared
+
+
+def smear_cartesian_direction_vectorization_wrapper(ux, uy, uz, sigma, random_state) :
+    '''
+    Wrapper for `smear_cartesian_direction` that allows easier vectorization (accepts arrays of direction vector components)
+    '''
+
+    smeared_u = smear_cartesian_direction(np.array([ux, uy, uz]), sigma, random_state)
+
+    return smeared_u[0], smeared_u[1], smeared_u[2]
+
+
+def convert_to_cartesian(zenith, azimuth) :
+    '''
+    Convert a direction vector from zenith/azimuth representation to Cartestian (x,y,z) coords representation
+
+    See I3Direction::CalcCarFromSph
+    However, I define x, y, z as direction to source (same as zenith/azimuth)
+    '''
+
+    theta = np.pi - zenith
+    phi = azimuth - np.pi
+
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+
+    # Invert direction w.r.t. I3Direction (as want pointing at source, as az/zen is, not along particle direction)
+    neg_x = -1. * x
+    neg_y = -1. * y
+    neg_z = -1. * z
+
+    return neg_x, neg_y, neg_z
+
+
+def convert_to_zenith_azimuth(x, y, z) :
+    '''
+    Convert a direction vector from Cartestian coord (x,y,z) representation to zenith/azimuth respresentation
+
+    See I3Direction::CalcSphFromCar
+    However, I define x, y, z as direction to source (same as zenith/azimuth)
+    '''
+
+    # Invert direction w.r.t. I3Direction (as want pointing at source, as az/zen is, not along particle direction)
+    neg_x = -1. * x
+    neg_y = -1. * y
+    neg_z = -1. * z
+
+    r = np.sqrt( np.square(neg_x) + np.square(neg_y) + np.square(neg_z) )
+    theta = np.arccos(neg_z / r)
+    phi = np.arctan2(neg_y, neg_x)
+
+    zenith = np.pi - theta
+    azimuth = phi - np.pi
+
+    zenith, azimuth = apply_rotational_bounds(zenith, azimuth)
+
+    return zenith, azimuth
+
+
+def smear_zenith_azimuth(zenith, azimuth, sigma, random_state) :
+    '''
+    Apply Gaussian smearing (e.g. resolution effects) to a direction vector defined by zenith/azimuth
+    '''
+
+    # Convert to Cartesian direction vector
+    ux, uy, uz = convert_to_cartesian(zenith, azimuth)
+
+    # Smear the Cartesian direction vector
+    vfunc = np.vectorize(smear_cartesian_direction_vectorization_wrapper)
+    smeared_ux, smeared_uy, smeared_uz = vfunc(ux, uy, uz, sigma, random_state)
+
+    # Convert back to zenith/azimuth 
+    smeared_zenith, smeared_azimuth = convert_to_zenith_azimuth(smeared_ux, smeared_uy, smeared_uz)
+
+    return smeared_zenith, smeared_azimuth
+
+
+def visible_energy_correction(particle_key, true_energy, inelasticity=None) :
+    '''
+    Determine the visible energy in the events, based on the incoming neutrino energy 
+    and inelasticity of the event.
+
+    Basically is a simple attempt to account for invisible final state neutrinos.
+    '''
+
+    #TODO Handle weird inelasticity values
 
     assert particle_key.startswith("nu")
+
+    # If user did not provide inelasticity, use a very approximate (and energy independent) number
+    if inelasticity is None :
+        inelasticity = 0.4
+        logging.warn("`inelasticity` not provided, assuming a default value for visible energy correction")
+
 
     if particle_key.startswith("nutau") and particle_key.endswith("_cc") :
 
@@ -151,7 +352,8 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None, tau_
         # nutau CC case
         #
 
-        assert tau_lepton_energy is not None
+        # Determine tau lepton energy from the inelasticity
+        tau_lepton_energy = true_energy * (1. - inelasticity)
 
         # http://pdg.lbl.gov/2014/listings/rpp2014-list-tau.pdf
         # ~50% of tau decays produce 1 neutrino in 3 particles (hadronic channels)
@@ -160,6 +362,7 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None, tau_
         # of energy from tau lepon to be missing
         tau_decay_neutrino_energy_fraction = 0.5
 
+        # Compute the visible energy
         vis_energy = true_energy - ( tau_lepton_energy * tau_decay_neutrino_energy_fraction )
 
 
@@ -169,10 +372,7 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None, tau_
         # NC case
         #
 
-        assert inelasticity is not None
-
-        #TODO Could just store the outgoing neutrino energy here too
-
+        # Compute the visible energy
         vis_energy = true_energy * inelasticity
 
 
@@ -185,68 +385,6 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None, tau_
 
     return vis_energy
 
-
-# def simple_visible_energy_correction(particle_key, true_energy, params) :
-#     '''
-#     Simple parameterisation to estimate the fraction of total input (e.g. neutrino) energy 
-#     in the events that ends up in visible particles, e.g. not neutrinos.
-
-#     NC events have a final state neutrino from the initial vertex.
-#     nutau CC events have a final state neutrino from decay of the secondary tau.
-
-#     An accurate determination of this would consider:
-#         - Inelastic of NC events
-#         - Inelasticity + tau decay kinematics of nutau NC events
-#         - Is there any extra missing energy in QE/resonance events?
-
-#     Using a parameterisation of the following form, which roughly matches plots for <y> vs energy
-#     and fits our Evis vs Etrue distribtions  in our GENIE MC pretty well.
-
-#     This does not take into account the tau decay kinematics for nutau CC events as unfortunately 
-#     our GENIE MC files don't store the tau decay products, although can at least tune down the nu NC
-#     parameterisation to give something approximate.
-
-#     C(E) = { [ C(1 GeV) - C(inf) ] * E^n } + C(inf)
-#     Evis = C(E) * E
-
-#     C must be <= 1
-
-#     Parameters
-#     ----------
-#     particle_key : string
-#         Key identifiying the particle type, e.g. numu_cc, nutau_nc, etc.
-#     params : dict
-#         keys   : particle key (wilcards accepted)
-#         values : list : [ correction at E = 1 GeV, correction at E = inf, index/power of energy dependence ]
-#         (example: params = {'nu*_nc':[0.7, 0.35, -0.3],})
-
-#     Returns
-#     -------
-#     visible_energy : array
-#         visible energy for each event
-
-#     '''
-
-#     assert particle_key.startswith("nu")
-
-#     # Grab the params for this particle type
-#     _, corr_params = dict_lookup_wildcard(dict_obj=params, key=particle_key)
-#     assert len(corr_params) == 3
-#     C_1_GeV = corr_params[0]
-#     C_inf = corr_params[1]
-#     n = corr_params[2]
-
-#     # Calc correction
-#     C = ( ( C_1_GeV - C_inf ) * np.power(true_energy, n) ) + C_inf
-
-#     # Ensure physical values
-#     C[C > 1.] = 1.
-#     C[C < 0.] = 0.
-
-#     # Calc visible energy
-#     visible_energy = C * true_energy
-
-#     return visible_energy
 
 
 def energy_dependent_sigma(energy, energy_0, sigma_0, energy_power) :
@@ -277,7 +415,7 @@ def energy_dependent_sigma(energy, energy_0, sigma_0, energy_power) :
     return sigma_E
 
 
-def simple_reco_energy_parameterization(particle_key, true_energy, inelasticity, tau_lepton_energy, params, random_state) :
+def simple_reco_energy_parameterization(particle_key, true_energy, params, random_state, inelasticity=None) :
     '''
     Function to produce a smeared reconstructed energy distribution.
     Resolution is particle- and energy-dependent
@@ -296,8 +434,8 @@ def simple_reco_energy_parameterization(particle_key, true_energy, inelasticity,
         values : list : [ E0 (reference true_energy), median reco error at E0, index/power of energy dependence ]
         (example: params = {'nue*_cc':[10.,0.2,0.2],})
 
-    vis_energy_params : dict
-        See docs for `params` in `simple_visible_energy_correction`
+    inelasticity : array
+        Inelasticity, y, array
 
     random_state : np.random.RandomState
         User must provide the random state, meaning that reproducible results 
@@ -326,7 +464,6 @@ def simple_reco_energy_parameterization(particle_key, true_energy, inelasticity,
         particle_key=particle_key, 
         true_energy=true_energy, 
         inelasticity=inelasticity, 
-        tau_lepton_energy=tau_lepton_energy,
     )
 
     # Grab the params for this particle type
@@ -355,15 +492,102 @@ def simple_reco_energy_parameterization(particle_key, true_energy, inelasticity,
     # Ensure physical values
     reco_energy[reco_energy < 0.] = 0.
 
+    # Final checks
+    assert np.all( np.isfinite(reco_energy) ), "Non-finite `reco_energy` values found"
+
     return reco_energy
 
 
-def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, inelasticity, tau_lepton_energy, params, random_state) :
+def simple_reco_direction_parameterization(particle_key, true_energy, true_coszen, true_azimuth, params, random_state, inelasticity=None) :
+    '''
+    Function to produce a smeared reconstructed direction distribution, where
+    direction is specified by cos(zenith) and azimuth.
+
+    Resolution is particle- and energy-dependent.
+    Use as a placeholder if real reconstructions are not currently available.
+
+    Am assuming an overall direction error, not breaking into zenith vs azimuth.
+    In principal our detector has better zenith resolution than azimuth, but 
+    parametrising this gets complicated since azimuth resolution is function or 
+    energy and zenith. 
+
+    Parameters
+    ----------
+    true_energy : array
+        True energy array.
+
+    true_coszen : array
+        True cos(zenith angle) array.
+
+    true_azimuth : array
+        True azimuth angle array.
+
+    params : dict
+        keys   : particle key (wilcards accepted)
+        values : list : [ E0 (reference true_energy), median reco error at E0, index/power of energy dependence ]
+        (example: params = {'nue*_cc':[10.,0.2,0.5],})
+
+    inelasticity : array
+        Inelasticity, y, array
+
+    random_state : np.random.RandomState
+        User must provide the random state, meaning that reproducible results 
+        can be obtained when calling multiple times.
+
+    Returns
+    -------
+    reco_coszen : array
+        Reconstructed cos(zenith angle) array.
+    '''
+
+    #TODO This is slow, look to optimise (is only run during setup though so isn't end of the world)
+
+    assert particle_key.startswith("nu")
+
+    # Default random state with no fixed seed
+    if random_state is None :
+        random_state = np.random.RandomState()
+
+    # Convert to zenith
+    true_zenith = np.arccos(true_coszen)
+
+    # Get the visible energy
+    visible_energy = visible_energy_correction(
+        particle_key=particle_key, 
+        true_energy=true_energy, 
+        inelasticity=inelasticity, 
+    )
+
+    # Grab the params for this particle type
+    _, energy_dependent_sigma_params = dict_lookup_wildcard(dict_obj=params, key=particle_key)
+    assert len(energy_dependent_sigma_params) == 3
+
+    # Get the sigma of the "direction reco error" distribution (energy dependent)
+    # Use visible energy instead of energy, as expect worse resolution if less photons
+    energy_0 = energy_dependent_sigma_params[0]
+    reco_error_sigma_0 = energy_dependent_sigma_params[1]
+    energy_power = energy_dependent_sigma_params[2]
+    reco_error_sigma = energy_dependent_sigma(visible_energy, energy_0, reco_error_sigma_0, energy_power)
+
+    # Smearing
+    reco_zenith, reco_azimuth = smear_zenith_azimuth(true_zenith, true_azimuth, reco_error_sigma, random_state)
+
+    # Convert back to coszen 
+    reco_coszen = np.cos(reco_zenith)
+
+    # Final checks
+    assert np.all( np.isfinite(reco_coszen) ), "Non-finite `reco_coszen` values found"
+    assert np.all( np.isfinite(reco_azimuth) ), "Non-finite `reco_azimuth` values found"
+
+    return reco_coszen, reco_azimuth
+
+
+def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, params, random_state, inelasticity=None) :
     '''
     Function to produce a smeared reconstructed cos(zenith) distribution.
-    Resolution is particle- and energy-dependent
-    Use as a placeholder if real reconstructions are not currently available.
-    Keep within the rotational bounds
+
+    If only care about cos(zen) but not directin in general (e.g. oscillations), can use this.
+    Otherwise use `simple_reco_direction_parameterization` instead.
 
     Parameters
     ----------
@@ -378,8 +602,8 @@ def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, 
         values : list : [ E0 (reference true_energy), median reco error at E0, index/power of energy dependence ]
         (example: params = {'nue*_cc':[10.,0.2,0.5],})
 
-    vis_energy_params : dict
-        See docs for `params` in `simple_visible_energy_correction`
+    inelasticity : array
+        Inelasticity, y, array
 
     random_state : np.random.RandomState
         User must provide the random state, meaning that reproducible results 
@@ -390,6 +614,8 @@ def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, 
     reco_coszen : array
         Reconstructed cos(zenith angle) array.
     '''
+
+    #TODO should do this at same time as azimuth to do consistent rotation bounds
 
     assert particle_key.startswith("nu")
 
@@ -402,7 +628,6 @@ def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, 
         particle_key=particle_key, 
         true_energy=true_energy, 
         inelasticity=inelasticity, 
-        tau_lepton_energy=tau_lepton_energy,
     )
 
     # Grab the params for this particle type
@@ -425,85 +650,16 @@ def simple_reco_coszen_parameterization(particle_key, true_energy, true_coszen, 
 
     # Enforce rotational bounds
     out_of_bounds_mask = reco_coszen > 1.
-    reco_coszen[out_of_bounds_mask] = reco_coszen[out_of_bounds_mask] - ( 2. * (reco_coszen[out_of_bounds_mask] - 1.) )
+    # reco_coszen[out_of_bounds_mask] = reco_coszen[out_of_bounds_mask] - ( 2. * (reco_coszen[out_of_bounds_mask] - 1.) )
+    reco_coszen[out_of_bounds_mask] = 1. - reco_coszen[out_of_bounds_mask] - ( 2. * (reco_coszen[out_of_bounds_mask] - 1.) )
 
     out_of_bounds_mask = reco_coszen < -1.
     reco_coszen[out_of_bounds_mask] = reco_coszen[out_of_bounds_mask] - ( 2. * (reco_coszen[out_of_bounds_mask] + 1.) )
 
+    # Final checks
+    assert np.all( np.isfinite(reco_coszen) ), "Non-finite `reco_coszen` values found"
+
     return reco_coszen
-
-
-def simple_reco_azimuth_parameterization(particle_key, true_energy, true_azimuth, inelasticity, tau_lepton_energy, params, random_state) :
-    '''
-    Function to produce a smeared reconstructed azimuth distribution.
-    Resolution is particle- and energy-dependent
-    Use as a placeholder if real reconstructions are not currently available.
-    Keep within the rotational bounds
-
-    Parameters
-    ----------
-    true_azimuth : array
-        True azimuth angle array [rad].
-
-    true_energy : array
-        True energy array.
-
-    params : dict
-        keys   : particle key (wilcards accepted)
-        values : list : [ E0 (reference true_energy), median reco error at E0, index/power of energy dependence ]
-        (example: params = {'nue*_cc':[10.,0.2,0.5],})
-
-    random_state : np.random.RandomState
-        User must provide the random state, meaning that reproducible results 
-        can be obtained when calling multiple times.
-
-    Returns
-    -------
-    reco_azimuth : array
-        Reconstructed azimuth array [rad].
-    '''
-
-    assert particle_key.startswith("nu")
-
-    # Default random state with no fixed seed
-    if random_state is None :
-        random_state = np.random.RandomState()
-
-    # Get the visible energy
-    visible_energy = visible_energy_correction(
-        particle_key=particle_key, 
-        true_energy=true_energy, 
-        inelasticity=inelasticity, 
-        tau_lepton_energy=tau_lepton_energy,
-    )
-
-    # Grab the params for this particle type
-    _, energy_dependent_sigma_params = dict_lookup_wildcard(dict_obj=params, key=particle_key)
-    assert len(energy_dependent_sigma_params) == 3
-
-    # Get the sigma of the "reco error" distribution (energy dependent)
-    # Easier to use this than the "reco azimuth" directly
-    # Use visible energy instead of energy, as expect worse resolution if less photons
-    energy_0 = energy_dependent_sigma_params[0]
-    reco_error_sigma_0 = energy_dependent_sigma_params[1]
-    energy_power = energy_dependent_sigma_params[2]
-    reco_error_sigma = energy_dependent_sigma(visible_energy, energy_0, reco_error_sigma_0, energy_power)
-
-    # Get the reco error
-    reco_error = random_state.normal(np.zeros_like(reco_error_sigma),reco_error_sigma)
-
-    # Compute the corresponding reco azimuth
-    reco_azimuth = true_azimuth + reco_error 
-
-    # Enforce rotational bounds
-    #TODO
-    # out_of_bounds_mask = reco_azimuth > 3.
-    # reco_azimuth[out_of_bounds_mask] = reco_azimuth[out_of_bounds_mask] - ( 2. * (reco_azimuth[out_of_bounds_mask] - 1.) )
-
-    # out_of_bounds_mask = reco_azimuth < -1.
-    # reco_azimuth[out_of_bounds_mask] = reco_azimuth[out_of_bounds_mask] - ( 2. * (reco_azimuth[out_of_bounds_mask] + 1.) )
-
-    return reco_azimuth
 
 
 def simple_pid_parameterization(particle_key,true_energy,params,track_pid,cascade_pid,random_state,) :
@@ -560,6 +716,9 @@ def simple_pid_parameterization(particle_key,true_energy,params,track_pid,cascad
     pid[track_mask] = track_pid
     pid[~track_mask] = cascade_pid
 
+    # Final checks
+    assert np.all( np.isfinite(pid) ), "Non-finite `pid` values found"
+
     return pid
 
 
@@ -615,8 +774,8 @@ class simple_param(PiStage):
                         "perfect_reco", #TODO move these to constructor args?
                         "vis_energy_params",
                         "reco_energy_params",
-                        "reco_coszen_params",
-                        "reco_azimuth_params",
+                        "reco_direction_params",
+                        # "reco_coszen_params",
                         "pid_track_params",
                         "track_pid",
                         "cascade_pid",
@@ -632,6 +791,7 @@ class simple_param(PiStage):
         output_apply_keys = (
                             'reco_energy',
                             'reco_coszen',
+                            'reco_azimuth',
                             'pid',
                             )
 
@@ -665,8 +825,8 @@ class simple_param(PiStage):
         perfect_reco = self.params.perfect_reco.value
         vis_energy_params = eval(self.params.vis_energy_params.value)
         reco_energy_params = eval(self.params.reco_energy_params.value)
-        reco_coszen_params = eval(self.params.reco_coszen_params.value)
-        reco_azimuth_params = eval(self.params.reco_azimuth_params.value)
+        # reco_coszen_params = eval(self.params.reco_coszen_params.value)
+        reco_direction_params = eval(self.params.reco_direction_params.value)
         pid_track_params = eval(self.params.pid_track_params.value)
         track_pid = self.params.track_pid.value.m_as("dimensionless")
         cascade_pid = self.params.cascade_pid.value.m_as("dimensionless")
@@ -684,8 +844,8 @@ class simple_param(PiStage):
             particle_key = container.name
             true_energy = container["true_energy"].get(WHERE)
             true_coszen = container["true_coszen"].get(WHERE)
-            inelasticity = container["inelasticity"].get(WHERE)
-            tau_lepton_energy = container["tau_lepton_energy"].get(WHERE)
+            true_azimuth = container["true_azimuth"].get(WHERE)
+            inelasticity = container["inelasticity"].get(WHERE) if "inelasticity" in container.array_data else None #TODO "in container" issue 
 
 
             #
@@ -704,7 +864,6 @@ class simple_param(PiStage):
                     particle_key=particle_key,
                     true_energy=true_energy,
                     inelasticity=inelasticity,
-                    tau_lepton_energy=tau_lepton_energy,
                     params=reco_energy_params,
                     random_state=random_state,
                 )
@@ -715,63 +874,35 @@ class simple_param(PiStage):
 
 
             #
-            # Get reco coszen
+            # Get reco direction
             #
 
-            # Create container if not already present
+            # Create containers if not already present
             if "reco_coszen" not in container.array_data :
                 container.add_array_data( "reco_coszen", np.full_like(true_coszen,np.NaN,dtype=FTYPE) )
+            if "reco_azimuth" not in container.array_data :
+                container.add_array_data( "reco_azimuth", np.full_like(true_azimuth,np.NaN,dtype=FTYPE) )
 
-            # Create the reco coszen variable
+            # Create the reco direction variables
             if perfect_reco :
                 reco_coszen = true_coszen
+                reco_azimuth = true_azimuth
             else :
-                reco_coszen = simple_reco_coszen_parameterization(
+                reco_coszen, reco_azimuth = simple_reco_direction_parameterization(
                     particle_key=particle_key,
                     true_energy=true_energy,
                     true_coszen=true_coszen,
+                    true_azimuth=true_azimuth,
                     inelasticity=inelasticity,
-                    tau_lepton_energy=tau_lepton_energy,
-                    params=reco_coszen_params,
+                    params=reco_direction_params,
                     random_state=random_state,
                 )
 
-            # Write to the container
+            # Write to the containers
             np.copyto( src=reco_coszen, dst=container["reco_coszen"].get("host") )
             container["reco_coszen"].mark_changed()
-
-
-            #
-            # Get reco azimuth
-            #
-
-            # Only if azimuth is provided
-            if "true_azimuth" in container.array_data :
-
-                true_azimuth = container["true_azimuth"].get(WHERE)
-
-                # Create container if not already present
-                if "reco_azimuth" not in container.array_data :
-                    container.add_array_data( "reco_azimuth", np.full_like(true_azimuth,np.NaN,dtype=FTYPE) )
-
-                # Create the reco azimuth variable
-                if perfect_reco :
-                    reco_azimuth = true_azimuth
-                else :
-                    reco_azimuth = simple_reco_azimuth_parameterization(
-                        particle_key=particle_key,
-                        true_energy=true_energy,
-                        true_azimuth=true_azimuth,
-                        inelasticity=inelasticity,
-                        tau_lepton_energy=tau_lepton_energy,
-                        params=reco_azimuth_params,
-                        random_state=random_state,
-                    )
-
-                # Write to the container
-                np.copyto( src=reco_azimuth, dst=container["reco_azimuth"].get("host") )
-                container["reco_azimuth"].mark_changed()
-
+            np.copyto( src=reco_azimuth, dst=container["reco_azimuth"].get("host") )
+            container["reco_azimuth"].mark_changed()
 
 
             #
@@ -801,4 +932,18 @@ class simple_param(PiStage):
             container["pid"].mark_changed()
 
 
+
+#
+# Testing
+#
+
+if __name__ == "__main__" :
+
+    # Test coord system transformations
+    N = 100
+    zen = random_state.uniform(0., np.pi, size=N)
+    az = random_state.uniform(0., 2.*np.pi, size=N)
+    x, y, z = convert_to_cartesian(zen, az)
+    zen2, az2 = convert_to_zenith_azimuth(x, y, z)
+    assert np.allclose(zen, zen2)
 
