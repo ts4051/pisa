@@ -189,7 +189,6 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
                 scalefactors = self.hypersurfaces[container.name].evaluate(param_values).reshape(container.size)
 
             # Where there are no scalefactors (e.g. empty bins), set scale factor to 1 
-            #TODO maybe this should be handle by Hypersurface.evaluate directly??
             empty_bins_mask = ~np.isfinite(scalefactors)
             num_empty_bins = np.sum(empty_bins_mask)
             if num_empty_bins > 0. :
@@ -214,11 +213,10 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
             # update uncertainty first, before the weights are changed
             if self.error_method == "sumw2":
                 if self.propagate_uncertainty:
-                    container["errors"] = calc_uncertainty(container["weights"].get(WHERE),
-                                                           container["errors"].get(WHERE),
-                                                           container["hypersurface_scalefactors"].get(WHERE),
-                                                           container["hypersurface_scalefactors_uncertainty"].get(WHERE),
-                                                          )                                                
+                    calc_uncertainty(container["weights"].get(WHERE),
+                                     container["hypersurface_scalefactors_uncertainty"].get(WHERE),
+                                     container["errors"].get(WHERE),
+                                    )                                     
                 else:
                     vectorizer.multiply(container["hypersurface_scalefactors"], container["errors"])
                 container['errors'].mark_changed()
@@ -237,10 +235,10 @@ class pi_hypersurfaces(PiStage):  # pyint: disable=invalid-name
 
 # vectorized function to apply uncertainty
 # must be outside class
-if FTYPE == np.float64:
-    signature = '(f8, f8, f8, f8)'
+if FTYPE == np.float32:
+    _SIGNATURE = ['(f4[:], f4[:], f4[:])']
 else:
-    signature = '(f4, f4, f4, f4)'
-@vectorize([signature], target=TARGET)
-def calc_uncertainty(weight, weight_error, scalefactor, scale_uncertainty):
-    return math.sqrt((weight_error*scalefactor)**2 + (weight*scale_uncertainty)**2)
+    _SIGNATURE = ['(f8[:], f8[:], f8[:])']
+@guvectorize(_SIGNATURE, '(),()->()', target=TARGET)
+def calc_uncertainty(weight, scale_uncertainty, out):
+    out[0] = weight[0]*scale_uncertainty[0]
