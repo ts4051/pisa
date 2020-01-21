@@ -1906,8 +1906,8 @@ def plot_bin_fits(ax, hypersurface, bin_idx, param_name, color=None, label=None,
     assert len(bin_idx) == len(hypersurface.binning.shape)
 
     # Get bin values for this bin only
-    chosen_bin_values = [ m.nominal_values[bin_idx] for m in hypersurface.fit_maps ]
-    chosen_bin_sigma = [ m.std_devs[bin_idx] for m in hypersurface.fit_maps ]
+    chosen_bin_values = np.squeeze([ m.nominal_values[bin_idx] for m in hypersurface.fit_maps ])
+    chosen_bin_sigma = np.squeeze([ m.std_devs[bin_idx] for m in hypersurface.fit_maps ])
 
     # Define a mask for selecting on-axis points only
     on_axis_mask = hypersurface.get_on_axis_mask(param.name)
@@ -2056,11 +2056,11 @@ def plot_bin_fits_2d(ax, hypersurface, bin_idx, param_names ) :
 #
 def generate_asimov_testdata(binning, parameters, true_param_coeffs,
                              nominal_param_values, sys_param_values,
-                             error_scale=0.1, log=False,
+                             error_scale=0.1, log=False, intercept=2.,
                             ):
     hypersurface = Hypersurface( 
         params=parameters, # Specify the systematic parameters
-        initial_intercept=1., # Intercept value (or first guess for fit)
+        initial_intercept=intercept, # Intercept value (or first guess for fit)
         log=log,
     )
     assert set(hypersurface.params.keys()) == set(nominal_param_values.keys())
@@ -2092,13 +2092,14 @@ def generate_asimov_testdata(binning, parameters, true_param_coeffs,
         # logging.info("Systematic hist: \n%s" % str(sys_maps[-1].hist))
     return nom_map, sys_maps
     
-def test_hypersurface_uncertainty():
+def test_hypersurface_uncertainty(logmode=True):
     '''
     Simple test of hypersurface fits + uncertainty
     1. Creates some Asimov test data matching a true hypersurface and checks the ability
        to fit back the truth.
     2. Fluctuates Asimov test data randomly to check uncertainties claimed by hypersurface
     '''
+    import matplotlib.pyplot as plt
     # Define systematic parameters in the hypersurface
     params = [
         HypersurfaceParam(name="foo", func_name="linear", initial_fit_coeffts=[1.],),
@@ -2108,13 +2109,13 @@ def test_hypersurface_uncertainty():
     hypersurface = Hypersurface( 
         params=params, # Specify the systematic parameters
         initial_intercept=1., # Intercept value (or first guess for fit)
-        log=True
+        log=logmode
     )
     from pisa.core.map import Map, MapSet
     # Define binning with one dummy bin
     binning = MultiDimBinning([OneDimBinning(name="reco_energy", domain=[0.,10.], num_bins=1, units=ureg.GeV,is_lin=True)])
     # Define true coefficients
-    true_coeffs = {'foo': [0.4], 'bar': [0.2, -0.1]}
+    true_coeffs = {'foo': [0.4], 'bar': [0.2, -1.]}
     nominal_param_values = {'foo': 1., 'bar': 0.}
     # making combinations of systematic values
     foo_vals = np.linspace(-1., 2., 6)
@@ -2129,7 +2130,8 @@ def test_hypersurface_uncertainty():
                                                  true_coeffs,
                                                  nominal_param_values,
                                                  sys_param_values,
-                                                 log=True
+                                                 log=logmode,
+                                                 error_scale=0.2,
                                                 )
     # Perform fit
     hypersurface.fit(
@@ -2141,6 +2143,17 @@ def test_hypersurface_uncertainty():
     )
     # Report the results
     logging.info("Fitted hypersurface report:\n%s" % hypersurface)
+    
+    fig, ax = plt.subplots()
+    plot_bin_fits(ax, hypersurface, bin_idx=[0], param_name='foo', label='Asimov test map')
+    ax.grid()
+    plt.savefig('test_hypersurface_foo.pdf')
+    
+    fig, ax = plt.subplots()
+    plot_bin_fits(ax, hypersurface, bin_idx=[0], param_name='bar', label='Asimov test map')
+    ax.grid()
+    plt.savefig('test_hypersurface_bar.pdf')
+    
     # Evaluate hypersurface and uncertainties at some points
     # that just happen to be the systematic values (but choice could be different)
     asimov_true_points = []
@@ -2195,8 +2208,6 @@ def test_hypersurface_uncertainty():
     logging.info("Mean pulls per point:\n%s" % str(std_pulls))
     logging.info("Mean pull: %.3f" % np.mean(std_pulls))
     # plotting
-    
-    import matplotlib.pyplot as plt
     plt.figure()
     plt.hist(all_pulls.flatten(), bins=50, density=True, label='fluctuated fits')
     x_plot = np.linspace(-4, 4, 100)
