@@ -342,10 +342,13 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None) :
 
     # If user did not provide inelasticity, use a very approximate (and energy independent) number
     if inelasticity is None :
-        inelasticity = 0.4
+        inelasticity = np.full_like(true_energy, 0.4)
         logging.warn("`inelasticity` not provided, assuming a default value for visible energy correction")
 
+    # Get a finite mask for inelasticity (NaN for interaction channels where it doesn't apply)
+    inelasticity_finite_mask = np.isfinite(inelasticity)
 
+    # Handle different particle cases
     if particle_key.startswith("nutau") and particle_key.endswith("_cc") :
 
         #
@@ -380,7 +383,10 @@ def visible_energy_correction(particle_key, true_energy, inelasticity=None) :
 
         vis_energy = true_energy
 
+    # Correct NaNs from undefined inelasticity
+    vis_energy[~inelasticity_finite_mask] = true_energy[~inelasticity_finite_mask]
 
+    # Correct 0 energy
     vis_energy[vis_energy < 0.] = 0.
 
     return vis_energy
