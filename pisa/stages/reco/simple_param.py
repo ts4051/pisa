@@ -32,7 +32,7 @@ for MC events using simple parameterisations.
 
 from __future__ import absolute_import, print_function, division
 
-import math, fnmatch, collections
+import math, fnmatch, collections, sys, os
 import numpy as np
 
 from pisa import FTYPE, TARGET
@@ -40,10 +40,21 @@ from pisa.core.pi_stage import PiStage
 from pisa.utils.log import logging
 from pisa.utils.profiler import profile
 from pisa.utils.numba_tools import WHERE, myjit, ftype
+from pisa.utils.resources import find_resource
+
+# Grab some geometric tools from the fridge repo
+try:
+    PATH = find_resource("../utils/maths/vectors.py")
+except IOError:
+    raise IOError(
+        "Cannot find `fridge/utils/maths/vectors.py` from the `fridge` repository."
+        " Please make sure to add `fridge/analysis` to your `PISA_RESOURCES` environment variable."
+    )
+sys.path.append(os.path.dirname(PATH))
+from vectors import wrap_in_two_pi, apply_rotational_bounds, rotation_matrix_between_vectors, convert_to_cartesian, convert_to_zenith_azimuth
 
 
-
-__all__ = ["simple_param","simple_reco_energy_parameterization","simple_reco_coszen_parameterization","simple_pid_parameterization"]
+__all__ = ["simple_param", "simple_reco_energy_parameterization", "simple_reco_coszen_parameterization", "simple_pid_parameterization"]
 
 __author__ = 'T. Stuttard'
 
@@ -138,92 +149,6 @@ def has_muon(particle_key) :
     return ( particle_key.startswith("numu") and particle_key.endswith("_cc") )
 
 
-
-
-def wrap_in_two_pi(angle) :
-    '''
-    Wrap an array of angles such that all values are within [0, 2pi]
-    '''
-
-    two_pi = 2. * np.pi
-
-    while True :
-
-        lt_mask = angle < 0
-        if lt_mask.sum() > 0 :
-            angle[lt_mask] += two_pi
-
-        gt_mask = angle > two_pi
-        if gt_mask.sum() > 0 :
-            angle[gt_mask] -= two_pi
-        
-        if (lt_mask.sum() == 0) and (gt_mask.sum() == 0) :
-            break
-
-    return angle
-
-
-def apply_rotational_bounds(zenith, azimuth) :
-    '''
-    Apply rotational bounds to an array of directions, defined by zenith and azimuth angles.
-    Coord system definition: http://software.icecube.wisc.edu/documentation/projects/dataclasses/i3direction.html
-    '''
-
-    #
-    # zenith
-    #
-
-    # zenith is defined in range [0, pi]
-    # Extending bey_originnd zenith range requires a change in azimuth
-
-    # First, get into [0,2pi] range
-    zenith = wrap_in_two_pi(zenith)
-
-    # Next, enforce [0,pi] range by ading pi rotation to azimuth for zenith in [pi,2pi]
-    while True :
-        mask = zenith > np.pi
-        if mask.sum() :
-            zenith[mask] = np.pi - (zenith[mask] - np.pi)
-            azimuth[mask] += np.pi
-        else :
-            break
-
-    #
-    # azimuth
-    #
-
-    # Azimuth is undefined for completely up/down-going particles
-    #TODO
-
-    # Wrap azimuth into [0, 2pi]
-    azimuth = wrap_in_two_pi(azimuth)
-
-    return zenith, azimuth
-
-
-def rotation_matrix_between_vectors(a, b) :
-    '''
-    Get rotation martrix between two vectors
-    '''
-
-    from scipy.spatial.transform import Rotation
-
-    assert a.shape == (3,)
-    assert b.shape == (3,)
-
-    a = a / np.linalg.norm(a)
-    b = b / np.linalg.norm(b)
-
-    angle = np.arccos( np.dot(a, b) )
-
-    axis = np.cross(a,b)
-    axis /= np.linalg.norm(axis)
-
-    # return Rotation.from_dcm( rotation_matrix_axis_angle(axis, angle) )
-    # return Rotation.from_euler(axis, angle)
-    return Rotation.from_rotvec( axis * angle )
-
-
 def smear_cartesian_direction(d, sigma, random_state) :
     '''
     Apply Gaussian smearing (e.g. resolution effects) to a Cartesian direction vector
@@ -239,9 +164,11 @@ def smear_cartesian_direction(d, sigma, random_state) :
     # Generate a new direction with an angle draw from a Gaussian distribution
     # It is randomly oriented around the original vector, e.g. somewhere on a cone
     # First define this relative to the z axis
-    # This can be thought of as the delta/error (which has nt yet been applied to the original valie)
+    # This can be thought of as the delta/error (which has not yet been applied to the original valie)
     z_axis = np.array([0., 0., 1.])
-    smearing_rotation = Rotation.from_euler("xz", [random_state.normal(0., sigma), random_state.uniform(0., 2.*np.pi)])
+    delta_theta = random_state.normal(0., sigma)
+    delta_phi = random_state.uniform(0., 2.*np.pi)
+    smearing_rotation = Rotation.from_euler("xz", [delta_theta, delta_phi])
     smeared_wrt_z = smearing_rotation.apply(z_axis)
 
     # Now transform this vector to the original direction
@@ -260,54 +187,6 @@ def smear_cartesian_direction_vectorization_wrapper(ux, uy, uz, sigma, random_st
     smeared_u = smear_cartesian_direction(np.array([ux, uy, uz]), sigma, random_state)
 
     return smeared_u[0], smeared_u[1], smeared_u[2]
-
-
-def convert_to_cartesian(zenith, azimuth) :
-    '''
-    Convert a direction vector from zenith/azimuth representation to Cartestian (x,y,z) coords representation
-
-    See I3Direction::CalcCarFromSph
-    However, I define x, y, z as direction to source (same as zenith/azimuth)
-    '''
-
-    theta = np.pi - zenith
-    phi = azimuth - np.pi
-
-    x = np.sin(theta) * np.cos(phi)
-    y = np.sin(theta) * np.sin(phi)
-    z = np.cos(theta)
-
-    # Invert direction w.r.t. I3Direction (as want pointing at source, as az/zen is, not along particle direction)
-    neg_x = -1. * x
-    neg_y = -1. * y
-    neg_z = -1. * z
-
-    return neg_x, neg_y, neg_z
-
-
-def convert_to_zenith_azimuth(x, y, z) :
-    '''
-    Convert a direction vector from Cartestian coord (x,y,z) representation to zenith/azimuth respresentation
-
-    See I3Direction::CalcSphFromCar
-    However, I define x, y, z as direction to source (same as zenith/azimuth)
-    '''
-
-    # Invert direction w.r.t. I3Direction (as want pointing at source, as az/zen is, not along particle direction)
-    neg_x = -1. * x
-    neg_y = -1. * y
-    neg_z = -1. * z
-
-    r = np.sqrt( np.square(neg_x) + np.square(neg_y) + np.square(neg_z) )
-    theta = np.arccos(neg_z / r)
-    phi = np.arctan2(neg_y, neg_x)
-
-    zenith = np.pi - theta
-    azimuth = phi - np.pi
-
-    zenith, azimuth = apply_rotational_bounds(zenith, azimuth)
-
-    return zenith, azimuth
 
 
 def smear_zenith_azimuth(zenith, azimuth, sigma, random_state) :
