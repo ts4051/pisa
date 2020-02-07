@@ -6,7 +6,7 @@ Hypersurfaces can be used to model systematic uncertainties derived from discret
 simulation datasets, for example for detedctor uncertainties.
 """
 
-__all__ = ['get_num_args', 'Hypersurface', 'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces', 'plot_bin_fits', 'plot_bin_fits_2d']
+__all__ = ['get_num_args', 'HypersurfaceInterpolator', 'Hypersurface', 'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces', 'plot_bin_fits', 'plot_bin_fits_2d']
 
 __author__ = 'T. Stuttard'
 
@@ -189,39 +189,44 @@ HYPERSURFACE_PARAM_FUNCTIONS["exponential"] = exponential_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["logarithmic"] = logarithmic_hypersurface_func
 
 class HypersurfaceInterpolator(object):
-    '''
-    Factory for interpolated hypersurfaces.
+    """Factory for interpolated hypersurfaces.
     
     After being initialized with a set of hypersurface fits produced at different
     parameters, it uses spline interpolation to produce a Hypersurface object
     at a given point in parameter space.
     
-    Note that the splines are _not_ guaranteed to pass through the knots provided
-    by the user, unless a UnivariateSpline is used where smoothing can be 
-    forced to zero with keyword argument s = 0.
-    '''
+    Note that the splines are *not* guaranteed to pass through the knots provided
+    by the user, unless a :obj:`UnivariateSpline` is used where smoothing can be 
+    forced to zero with keyword argument ``s = 0``.
+    
+    Parameters
+    ----------
+    interp_params : list of dicts
+        list of up to two dicts describing parameters to be 
+        interpolated over of the form::
+            {
+                'name': 'param1',
+                'unit': 'param1s_unit'
+            }
+    hs_fits : list of dicts
+        list of dictionaries where each contains a :obj:`Hypersurface` as well
+        as the parameter value for which this :obj:`Hypersurface` was generated.
+        The keys in the dictionary `param_values` must match the names in 
+        `interp_params`. The dictionary for a 2D spline would be of the form::
+            {
+                param_values: {param1: Quantity(param1),
+                               param2: Quantity(param2)
+                              },
+                hypersurface: Hypersurface()
+            }
+        `param_values` must be given as quantities in units that can be converted
+        to the units given in `interp_params`. During evaluation, units are 
+        converted as necessary.
+    **spline_kw :
+        keyword arguments passed to ``interpolate.UnivariateSpline``
+        or ``interpolate.SmoothBivariateSpline`` depending on dimensionality
+    """
     def __init__(self, interp_params, hs_fits, **spline_kw):
-        '''
-        Initialize with a dictionary containing the locations and parameter
-        values of the pre-fit hypersurfaces.
-        
-        Args:
-            interp_params : list of dicts
-                list of up to two dicts describing parameters to be 
-                interpolated over of the form:
-                    {'name': 'param1', 'unit': 'param1s_unit'}
-            hs_fits : list of dicts
-                list of dictionaries where each is of the form:
-                    {'param_values': {'param1': Quantity(param1), 'param2': Quantity(param2)},
-                     'hypersurface': Hypersurface object,
-                    }
-                'param_values' must be given as quantities in units that can be converted
-                to the units given in 'interp_params'. During evaluation, units are 
-                converted as necessary.
-            spline_kw :
-                keyword arguments passed to interpolate.UnivariateSpline
-                or interpolate.SmoothBivariateSpline depending on dimensionality
-        '''
         self.ndim = len(interp_params)
         assert self.ndim in [1, 2], "can only work in either one or two dimensions"
         self.interp_params = interp_params
@@ -285,14 +290,17 @@ class HypersurfaceInterpolator(object):
         self.covar_bins_warning_issued = []
     
     def get_hypersurface(self, **param_kw):
-        '''
+        """
         Get a Hypersurface object with interpolated coefficients.
-        
-        Parameters are given as keyword arguments, where the names
-        of the arguments must match the names of the parameters over 
-        which the hypersurfaces are interpolated. The values 
-        are given as Quantity objects with units.
-        '''
+
+        Parameters
+        ----------
+        **param_kw
+            Parameters are given as keyword arguments, where the names
+            of the arguments must match the names of the parameters over 
+            which the hypersurfaces are interpolated. The values 
+            are given as :obj:`Quantity` objects with units.
+        """
         assert set(param_kw.keys()) == set([i['name'] for i in self.interp_params]), "invalid parameters"
         names = [p['name'] for p in self.interp_params]
         units = [p['unit'] for p in self.interp_params]
@@ -322,12 +330,28 @@ class HypersurfaceInterpolator(object):
         return hypersurface
     
     def make_slices(self, x_plot, name):
-        '''Make slices of hypersurfaces for plotting.
+        """Make slices of hypersurfaces for plotting.
         
         In some covariance matrices, the spline fits are corrected to make
         the matrix positive semi-definite. The slices produced by this function
         include all of those effects.
-        '''
+        
+        Parameters
+        ----------
+        x_plot : array_like
+            points at which the hypersurfaces are to be evaluated
+        name : :obj:`str`
+            name of the interpolation parameter to which the points in `x_plot`
+            correspond
+        
+        Returns
+        -------
+        coeff_slices : numpy.ndarray
+            slices in fit coefficients. Size: (binning..., number of coeffs, len(`x_plot`))
+        covar_slices : numpy.ndarray
+            slices in covariance matrix elements. 
+            Size: (binning..., number of coeffs, number of coeffs, len(`x_plot`))
+        """
         assert self.ndim == 1, "making slices is only supported for 1D at the moment"
         coeff_slices = np.zeros(self.coefficients.shape+(len(x_plot),))
         covar_slices = np.zeros(self.covars.shape+(len(x_plot),))
@@ -339,11 +363,12 @@ class HypersurfaceInterpolator(object):
         return coeff_slices, covar_slices
         
     def plot_fits_in_bin(self, bin_idx, ax=None, n_steps=20):
-        '''
+        """
         Plot the coefficients as well as covariance matrix elements as a function
         of the interpolation parameters.
         
-        Args:
+        Parameters
+        ----------
             bin_idx : tuple
                 index of the bin for which to plot the fits
             ax : 2D array of axes, optional
@@ -352,7 +377,7 @@ class HypersurfaceInterpolator(object):
                 size (n_coeff, n_coeff + 1).
             n_steps : int, optional
                 number of steps to plot between minimum and maximum
-        '''
+        """
         assert self.ndim == 1, "plotting currently only supported in 1D"
         # TODO Support 2D plotting
         import matplotlib.pyplot as plt

@@ -140,6 +140,14 @@ pisa.utils.hdfchain module
     :undoc-members:
     :show-inheritance:
 
+pisa.utils.hypersurface module
+---------------------
+
+.. automodule:: pisa.utils.hypersurface
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 pisa.utils.jsons module
 -----------------------
 
