@@ -6,9 +6,12 @@ Hypersurfaces can be used to model systematic uncertainties derived from discret
 simulation datasets, for example for detedctor uncertainties.
 """
 
-__all__ = ['get_num_args', 'HypersurfaceInterpolator', 'Hypersurface', 'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces', 'plot_bin_fits', 'plot_bin_fits_2d']
+__all__ = ['get_num_args', 'HypersurfaceInterpolator', 'Hypersurface',
+           'HypersurfaceParam', 'fit_hypersurfaces', 'load_hypersurfaces',
+           'load_interpolated_hypersurfaces', 'extract_interpolated_hypersurface_params',
+           'plot_bin_fits', 'plot_bin_fits_2d']
 
-__author__ = 'T. Stuttard'
+__author__ = 'T. Stuttard, A. Trettin'
 
 __license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
 
@@ -1845,6 +1848,51 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
     
     Analogously to "load_hypersurfaces", this function returns a 
     collection with a HypersurfaceInterpolator object for each Map.
+    
+    Parameters
+    ----------
+    input_file : str
+        A JSON input file containing paths to the fitted hypersurfaces.
+        An example for data in a JSON file for 2D splines in mass splitting 
+        and mixing angle is as follows::
+            {
+                'map_names': ['numu_cc', 'nutau_cc', ...], # must match hypersurfaces
+                'interp_params': [
+                                    {'name': 'deltam31',
+                                     'unit': 'electronvolt ** 2'
+                                    },
+                                    {'name': 'theta23',
+                                     'unit': 'degree'
+                                    },
+                                 ],
+                'hs_fits': [
+                                {
+                                 'param_values': {
+                                                    'deltam31': 2.*ureg.eV**2,
+                                                    'theta23': 40.*ureg.degree
+                                                 },
+                                 'file': '/hypersurface/fit/file1.json'
+                                },
+                                {
+                                 'param_values': {
+                                                    'deltam31': 3.*ureg.eV**2,
+                                                    'theta23': 45.*ureg.degree
+                                                 },
+                                 'file': '/hypersurface/fit/file2.json'
+                                },
+                                ...
+                           ]
+            }
+    expected_binning : One/MultiDimBinning, optional
+        Expected binning for hypersurface.
+        It will checked enforced that this matches the binning found in the parsed hypersurfaces.
+        For certain legacy cases where binning info is not stored, this will be assumed to be 
+        the actual binning.
+    
+    Returns
+    -------
+    collections.OrderedDict
+        dictionary with a :obj:`HypersurfaceInterpolator` for each map
     '''
     assert isinstance(input_file, str)
     if expected_binning is not None :
@@ -1874,11 +1922,22 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
 def extract_interpolated_hypersurface_params(input_file):
     '''
     Extract the names of the hypersurface parameter names from a file 
-    containing interpolated hypersurfaces without actually loading all of them.
     
-    This is useful to set up the pi_hypersurfaces stage to get the correct expected
+    This is useful to set up the ``pi_hypersurfaces`` stage to get the correct expected
     parameters without invoking the long loading process. The PISA stage does not
     have to know about the internal structure of the files.
+    
+    Parameters
+    ----------
+    input_file : :obj:`str`
+        path to a JSON file containing interpolated hypersurfaces
+    
+    Returns
+    -------
+    hs_param_names : list of :obj:`str`
+        names of the hypersurface parameters
+    int_param_names : list of :obj:`str`
+        names of parameters over which the hypersurfaces are interpolated, e.g. oscillation parameters
     '''
     assert isinstance(input_file, str)
     if input_file.endswith("json"):
