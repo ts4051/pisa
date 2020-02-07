@@ -27,13 +27,25 @@ __license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
  limitations under the License.'''
 
 def is_psd(A):
-    '''Test whether a matrix is positive semi-definite.
+    """Test whether a matrix is positive semi-definite.
 
-    Test is done via attempted Cholesky decomposition as suggested in:
+    Test is done via attempted Cholesky decomposition as suggested in [1]_.
 
-    N.J. Higham, "Computing a nearest symmetric positive semidefinite
-    matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
-    '''
+    Parameters
+    ----------
+    A : numpy.ndarray
+        Symmetric matrix
+    
+    Returns
+    -------
+    bool
+        True if `A` is positive semi-definite, else False
+
+    References
+    ----------
+    ..  [1] N.J. Higham, "Computing a nearest symmetric positive semidefinite
+        matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    """
     # pylint: disable=invalid-name
     try:
         _ = np.linalg.cholesky(A)
@@ -42,27 +54,38 @@ def is_psd(A):
         return False
 
 def fronebius_nearest_psd(A, return_distance=False):
-    '''
-    Find the positive semi-definite matrix that is nearest to A as measured by
-    the Fronebius norm.
+    """Find the positive semi-definite matrix closest to `A`.
 
-    This function is a modification of [1], which is a Python adaption of [2], which
-    credits [3].
+    The closeness to `A` is measured by the Fronebius norm. The matrix closest to `A`
+    by that measure is uniquely defined in [3]_.
 
-    [1] https://gist.github.com/fasiha/fdb5cec2054e6f1c6ae35476045a0bbd
-    [2] https://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
-    [3] N.J. Higham, "Computing a nearest symmetric positive semidefinite
-    matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    Parameters
+    ----------
+    A : numpy.ndarray
+        Symmetric matrix
+    return_distance : bool, optional
+        Return distance of the input matrix to the approximation as given in
+        theorem 2.1 in [3]_.
+        This can be compared to the actual Frobenius norm between the
+        input and output to verify the calculation.
 
-    Args:
-        m : numpy.ndarray
-            Symmetric matrix
-        return_distance : bool, optional
-            Return distance of the input matrix to the approximation as given in
-            theorem 2.1 in https://doi.org/10.1016/0024-3795(88)90223-6
-            This can be compared to the actual Frobenius norm between the
-            input and output to verify the calculation.
-    '''
+    Returns
+    -------
+    X : numpy.ndarray
+        Positive semi-definite matrix approximating `A`.
+
+    Notes
+    -----
+    This function is a modification of [1]_, which is a Python adaption of [2]_, which
+    credits [3]_.
+
+    References
+    ----------
+    ..  [1] https://gist.github.com/fasiha/fdb5cec2054e6f1c6ae35476045a0bbd
+    ..  [2] https://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
+    ..  [3] N.J. Higham, "Computing a nearest symmetric positive semidefinite
+        matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    """
     # pylint: disable=invalid-name
     assert A.ndim == 2, "input is not a 2D matrix"
     B = (A + A.T)/2.
@@ -92,7 +115,13 @@ def fronebius_nearest_psd(A, return_distance=False):
     return X
 
 def test_frob_psd(A):
-    '''Test approximation of Frobenius-closest PSD on given matrix'''
+    """Test approximation of Frobenius-closest PSD on given matrix
+    
+    Parameters
+    ----------
+    A : numpy.ndarray
+        Symmetric matrix
+    """
     # pylint: disable=invalid-name
     X, xdist = fronebius_nearest_psd(A, return_distance=True)
     is_psd_after = is_psd(X)

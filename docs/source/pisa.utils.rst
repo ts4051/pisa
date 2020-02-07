@@ -164,6 +164,14 @@ pisa.utils.log module
     :undoc-members:
     :show-inheritance:
 
+pisa.utils.matrix module
+---------------------
+
+.. automodule:: pisa.utils.matrix
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 pisa.utils.mcSimRunSettings module
 ----------------------------------
 
