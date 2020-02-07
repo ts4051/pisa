@@ -26,7 +26,7 @@ __license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
  See the License for the specific language governing permissions and
  limitations under the License.'''
 
-def is_psd(m):
+def is_psd(A):
     '''Test whether a matrix is positive semi-definite.
 
     Test is done via attempted Cholesky decomposition as suggested in:
@@ -35,7 +35,7 @@ def is_psd(m):
     matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
     '''
     try:
-        _ = np.linalg.cholesky(m)
+        _ = np.linalg.cholesky(A)
         return True
     except np.linalg.LinAlgError:
         return False
@@ -87,11 +87,11 @@ def fronebius_nearest_psd(A, return_distance=False):
         return X, dist
     return X
 
-def test_frob_psd(m):
+def test_frob_psd(A):
     '''Test approximation of Frobenius-closest PSD on given matrix'''
-    x, xdist = fronebius_nearest_psd(m, return_distance=True)
-    is_psd_after = is_psd(x)
-    actual_dist = lin.norm(m - x, ord='fro')
+    X, xdist = fronebius_nearest_psd(A, return_distance=True)
+    is_psd_after = is_psd(X)
+    actual_dist = lin.norm(A - X, ord='fro')
     assert is_psd_after, "did not produce PSD matrix"
     assert np.isclose(xdist, actual_dist), "actual distance differs from expectation"
 
