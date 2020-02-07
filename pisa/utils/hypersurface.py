@@ -29,10 +29,11 @@ import os, sys, collections, copy, inspect
 import pdb
 
 import numpy as np
+from scipy import interpolate
 from iminuit import Minuit 
 
 from pisa import FTYPE, TARGET, ureg
-from pisa.utils import vectorizer
+from pisa.utils import vectorizer, matrix
 from pisa.utils.jsons import from_json, to_json
 from pisa.core.pipeline import Pipeline
 from pisa.core.binning import OneDimBinning, MultiDimBinning, is_binning
@@ -140,6 +141,11 @@ class exponential_hypersurface_func(object) :
     Exponential hypersurface functional form
 
     f(p) = a * exp(b*p)
+    
+    Caution: This hypersurface function causes a degeneracy with 
+    the intercept and you may not recover injected coefficients!
+    To fit hypersurfaces with exponential shapes, it is more robust
+    to use the log-mode.
     '''
     def __init__(self):
         self.nargs = 2
@@ -182,10 +188,228 @@ HYPERSURFACE_PARAM_FUNCTIONS["quadratic"] = quadratic_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["exponential"] = exponential_hypersurface_func
 HYPERSURFACE_PARAM_FUNCTIONS["logarithmic"] = logarithmic_hypersurface_func
 
-'''
-Core hypersurface classes
-'''
+class HypersurfaceInterpolator(object):
+    '''
+    Factory for interpolated hypersurfaces.
+    
+    After being initialized with a set of hypersurface fits produced at different
+    parameters, it uses spline interpolation to produce a Hypersurface object
+    at a given point in parameter space.
+    
+    Note that the splines are _not_ guaranteed to pass through the knots provided
+    by the user, unless a UnivariateSpline is used where smoothing can be 
+    forced to zero with keyword argument s = 0.
+    '''
+    def __init__(self, interp_params, hs_fits, **spline_kw):
+        '''
+        Initialize with a dictionary containing the locations and parameter
+        values of the pre-fit hypersurfaces.
+        
+        Args:
+            interp_params : list of dicts
+                list of up to two dicts describing parameters to be 
+                interpolated over of the form:
+                    {'name': 'param1', 'unit': 'param1s_unit'}
+            hs_fits : list of dicts
+                list of dictionaries where each is of the form:
+                    {'param_values': {'param1': Quantity(param1), 'param2': Quantity(param2)},
+                     'hypersurface': Hypersurface object,
+                    }
+                'param_values' must be given as quantities in units that can be converted
+                to the units given in 'interp_params'. During evaluation, units are 
+                converted as necessary.
+            spline_kw :
+                keyword arguments passed to interpolate.UnivariateSpline
+                or interpolate.SmoothBivariateSpline depending on dimensionality
+        '''
+        self.ndim = len(interp_params)
+        assert self.ndim in [1, 2], "can only work in either one or two dimensions"
+        self.interp_params = interp_params
+        for p in interp_params:
+            assert set(['name', 'unit']) == set(p.keys()), "incorrect dict stucture"
+        for p in hs_fits:
+            assert set(['param_values', 'hypersurface']) == set(p.keys()), "incorrect dict structure"
+        reference_hs = hs_fits[0]['hypersurface']
+        # we are going to produce the hypersurface from a state that is the same
+        # as the reference, only the coefficients and covariance matrices are 
+        # injected from the spline interpolation.
+        self._reference_state = copy.deepcopy(reference_hs.serializable_state)
+        # for cleanliness we wipe numbers from the original state
+        self._reference_state["intercept_sigma"] = np.nan
+        self._reference_state["fit_maps_norm"] = None
+        self._reference_state["fit_maps_raw"] = None
+        self._reference_state["fit_chi2"] = np.nan
+        for param in self._reference_state['params'].values():
+            param['fit_coeffts_sigma'] = np.full_like(param['fit_coeffts_sigma'], np.nan)
+        # Instead of holding numbers, these coefficients and covariance 
+        # matrices are going to hold spline objects that can be called to interpolate
+        # at the requested point.
+        # The shape of fit_coeffts is [binning ..., fit coeffts]
+        self.coefficients = np.empty(reference_hs.fit_coeffts.shape, dtype=object)
+        # The shape of fit_cov_mat is [binning ..., fit coeffts, fit coeffts]
+        self.covars = np.empty(reference_hs.fit_cov_mat.shape, dtype=object)
+        names = [p['name'] for p in self.interp_params]
+        units = [p['unit'] for p in self.interp_params]
+        # We store the original points that went into the spline fit
+        # only for diagnostic purposes.
+        self._x = []
+        if self.ndim == 2:
+            self._y = []
+        for f in hs_fits:
+            self._x.append(f['param_values'][names[0]].m_as(units[0]))
+            if self.ndim == 2:
+                self._y.append(f['param_values'][names[1]].m_as(units[1]))
+        # dimension is [binning..., fit coeffts, number of fits]
+        self._coeff_z = np.zeros(self.coefficients.shape + (len(hs_fits),))
+        for idx in np.ndindex(self.coefficients.shape):
+            for i, f in enumerate(hs_fits):
+                self._coeff_z[idx][i] = f['hypersurface'].fit_coeffts[idx]
+            if self.ndim == 1:
+                self.coefficients[idx] = interpolate.UnivariateSpline(self._x, self._coeff_z[idx], **spline_kw)
+            elif self.ndim == 2:
+                self.coefficients[idx] = interpolate.SmoothBivariateSpline(self._x, self._y, 
+                                                                           self._coeff_z[idx], **spline_kw)
+        # dimension is [binning..., fit coeffts, fit coeffts, number of fits]
+        self._covar_z = np.zeros(self.covars.shape + (len(hs_fits),))
+        for idx in np.ndindex(self.covars.shape):
+            for i, f in enumerate(hs_fits):
+                self._covar_z[idx][i] = f['hypersurface'].fit_cov_mat[idx]
+            if self.ndim == 1:
+                self.covars[idx] = interpolate.UnivariateSpline(self._x, self._covar_z[idx], **spline_kw)
+            elif self.ndim == 2:
+                self.covars[idx] = interpolate.SmoothBivariateSpline(self._x, self._y,
+                                                                     self._covar_z[idx], **spline_kw)
+        # In order not to spam warnings, we only want to warn about non positive
+        # semi definite covariance matrices once for each bin. We store the bin
+        # indeces for which the warning has already been issued. 
+        self.covar_bins_warning_issued = []
+    
+    def get_hypersurface(self, **param_kw):
+        '''
+        Get a Hypersurface object with interpolated coefficients.
+        
+        Parameters are given as keyword arguments, where the names
+        of the arguments must match the names of the parameters over 
+        which the hypersurfaces are interpolated. The values 
+        are given as Quantity objects with units.
+        '''
+        assert set(param_kw.keys()) == set([i['name'] for i in self.interp_params]), "invalid parameters"
+        names = [p['name'] for p in self.interp_params]
+        units = [p['unit'] for p in self.interp_params]
+        x = [param_kw[n].m_as(u) for n, u in zip(names, units)]
+        state = copy.deepcopy(self._reference_state)
+        # fit covariance matrices are stored directly 
+        for idx in np.ndindex(state['fit_cov_mat'].shape):
+            state['fit_cov_mat'][idx] = self.covars[idx](*x) # calls the spline
+            assert np.isfinite(state['fit_cov_mat'][idx]), f"invalid cov matrix element encountered at {param_kw} in loc {idx}"
+        # check covariance matrices for symmetry, positive semi-definiteness
+        for bin_idx in np.ndindex(state['fit_cov_mat'].shape[:-2]):
+            m = state['fit_cov_mat'][bin_idx]
+            assert np.allclose(m, m.T), f'cov matrix not symmetric in bin {bin_idx}'
+            if not matrix.is_psd(m):
+                state['fit_cov_mat'][bin_idx] = matrix.fronebius_nearest_psd(m)
+                if not bin_idx in self.covar_bins_warning_issued:
+                    logging.warn(f'Invalid covariance matrix fixed in bin: {bin_idx}')
+                    self.covar_bins_warning_issued.append(bin_idx)
+        hypersurface = Hypersurface.from_state(state)
+        coeffts = np.zeros(self.coefficients.shape)
+        for idx in np.ndindex(self.coefficients.shape):
+            coeffts[idx] = self.coefficients[idx](*x) # calls spline interpolation
+            assert np.isfinite(coeffts[idx]), f"invalid coeff encountered at {param_kw} in loc {idx}"
+        # the setter method defined in the Hypersurface class takes care of
+        # putting the coefficients in the right place in their respective parameters
+        hypersurface.fit_coeffts = coeffts
+        return hypersurface
+    
+    def make_slices(self, x_plot, name):
+        '''Make slices of hypersurfaces for plotting.
+        
+        In some covariance matrices, the spline fits are corrected to make
+        the matrix positive semi-definite. The slices produced by this function
+        include all of those effects.
+        '''
+        assert self.ndim == 1, "making slices is only supported for 1D at the moment"
+        coeff_slices = np.zeros(self.coefficients.shape+(len(x_plot),))
+        covar_slices = np.zeros(self.covars.shape+(len(x_plot),))
+        for i, x in enumerate(x_plot):
+            pars = {name: x}
+            hs = self.get_hypersurface(**pars)
+            coeff_slices[..., i] = hs.fit_coeffts
+            covar_slices[..., i] = hs.fit_cov_mat
+        return coeff_slices, covar_slices
+        
+    def plot_fits_in_bin(self, bin_idx, ax=None, n_steps=20):
+        '''
+        Plot the coefficients as well as covariance matrix elements as a function
+        of the interpolation parameters.
+        
+        Args:
+            bin_idx : tuple
+                index of the bin for which to plot the fits
+            ax : 2D array of axes, optional
+                axes into which to place the plots. If None (default),
+                appropriate axes will be generated. Must have at least
+                size (n_coeff, n_coeff + 1).
+            n_steps : int, optional
+                number of steps to plot between minimum and maximum
+        '''
+        assert self.ndim == 1, "plotting currently only supported in 1D"
+        # TODO Support 2D plotting
+        import matplotlib.pyplot as plt
+        n_coeff = self.coefficients.shape[-1]
+        hs_param_names = list(self._reference_state['params'].keys())
+        hs_param_labels = ["intercept"] + [f"{p} p{i}" for p in hs_param_names
+                                           for i in range(self._reference_state['params'][p]['num_fit_coeffts'])]
+        if ax is None:
+            fig, ax = plt.subplots(nrows=n_coeff, ncols=n_coeff+1, 
+                                   squeeze=False, sharex=True,
+                                   figsize=(15, 10),
+                                  )
 
+        name = self.interp_params[0]['name']
+        unit = self.interp_params[0]['unit']
+        x_plot = np.linspace(np.min(self._x), np.max(self._x), n_steps)                       
+        coeff_slices, covar_slices = self.make_slices(x_plot*ureg[unit], name)
+        
+        # first row plots fit coefficients
+        for i in range(n_coeff):
+            z_plot = self.coefficients[bin_idx][i](x_plot)
+            ax[i, 0].plot(x_plot, z_plot, label='spline')
+            z_slice = coeff_slices[bin_idx][i]
+            # since there are no corrections on the fitted coefficients, there
+            # really should not be a difference between the original splines and 
+            # the coefficients in the hypersurface. If there are, there is a bug.
+            if not np.allclose(z_plot, z_slice):
+                ax[i, 0].plot(x_plot, z_slice, label='actual output')
+            ax[i, 0].scatter(self._x, self._coeff_z[bin_idx][i],
+                             color='k', marker='x', label='truth')
+            ax[i, 0].set_ylabel(hs_param_labels[i])
+            # rest of the columns displays the covariance matrix
+            # In some bins, the covariance matrix does get a correction to ensure
+            # that it is positive semi definite. These plots should show the difference.
+            for j in range(0, n_coeff):
+                coeff_idx=(i, j)
+                z_plot = self.covars[bin_idx][coeff_idx](x_plot)
+                ax[i, j+1].plot(x_plot, z_plot, label='spline')
+                ax[i, j+1].scatter(self._x, self._covar_z[bin_idx][coeff_idx],
+                                   color='k', marker='x', label='truth')
+                z_slice = covar_slices[bin_idx][coeff_idx]
+                if not np.allclose(z_plot, z_slice):
+                    ax[i, j+1].plot(x_plot, z_slice, label='after psd correction')
+        
+        for j in range(n_coeff+1):
+            ax[-1, j].set_xlabel(self.interp_params[0]['name'])
+        ax[0, 0].set_title('coefficient')
+        for j in range(n_coeff):
+            ax[0, j+1].set_title(f'cov. {hs_param_labels[j]}')
+        for i, j in np.ndindex((n_coeff, n_coeff+1)):
+            ax[i, j].grid()
+            ax[i, j].legend()
+            ax[i, j].relim()
+            ax[i, j].autoscale_view()
+            ax[i, j].ticklabel_format(style='sci', scilimits=(0,0))
+        fig.tight_layout()
+        
 class Hypersurface(object) :
     '''
     A class defining the hypersurface
@@ -439,6 +663,9 @@ class Hypersurface(object) :
             # Calculate uncertainty from gradients and covariance matrix
             transformed_jacobian = np.einsum('...j,...kj->...k', gradient_buffer, self.fit_cov_mat[bin_idx])
             variance = np.einsum('...j,...j', transformed_jacobian, gradient_buffer)
+            if np.any(variance < 0.):
+                logging.warn("Negative variances found in hypersurface, replacing with zeros.")
+                variance[variance < 0.] = 0.
         
         if return_uncertainty:
             return output_factors, np.sqrt(variance)
@@ -1029,7 +1256,22 @@ class Hypersurface(object) :
         array = np.stack(array,axis=-1)
         return array
 
-
+    @fit_coeffts.setter
+    def fit_coeffts(self, fit_coeffts):
+        '''
+        Setter to conveniently set the coefficients in the parameters 
+        of the hypersurface in the same order in which they are also
+        returned by the getter.
+        '''
+        assert fit_coeffts.shape == self.fit_coeffts.shape, "incorrect shape of coefficients"
+        self.intercept = fit_coeffts[..., 0]
+        n = 1
+        for param in self.params.values():
+            for i in range(param.num_fit_coeffts):
+                idx = param.get_fit_coefft_idx(coefft_idx=i)
+                param.fit_coeffts[idx] = fit_coeffts[..., n]
+                n += 1
+                
     @property
     def fit_coefft_labels(self) :
         '''
@@ -1572,7 +1814,61 @@ def fit_hypersurfaces(nominal_dataset, sys_datasets, params, output_dir, tag, co
 
     return output_dir
 
+def load_interpolated_hypersurfaces(input_file, expected_binning=None):
+    '''
+    Load a set of interpolated hypersurfaces from a file.
+    
+    Analogously to "load_hypersurfaces", this function returns a 
+    collection with a HypersurfaceInterpolator object for each Map.
+    '''
+    assert isinstance(input_file, str)
+    if expected_binning is not None :
+        assert is_binning(expected_binning)
+    if input_file.endswith("json"):
+        input_data = from_json(input_file)
+        assert set(['map_names', 'interp_params', 'hs_fits']) == set(input_data.keys()), 'incorrect data structure'
+        assert isinstance(input_data['interp_params'], list), 'interpolated parameters must be given as list, even if only one parameter is given'
+        keys = input_data['map_names']
+        output = collections.OrderedDict()
+        loaded_hs_collections = []
+        logging.info("Loading hypersurfaces for interpolation...")
+        for hs_fit in input_data['hs_fits']:
+            fit_dict = {'param_values': hs_fit['param_values']}
+            fit_dict['hs_collection'] = load_hypersurfaces(hs_fit['file'], expected_binning=expected_binning)
+            loaded_hs_collections.append(fit_dict)
+        logging.info("hypersurface file readout completed!")
+        for k in keys:
+            hs_fits = [{'param_values': fd['param_values'],
+                        'hypersurface': fd['hs_collection'][k]}
+                        for fd in loaded_hs_collections]
+            output[k] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits)
+    else:
+        raise Exception("unknown file format")
+    return output
 
+def extract_interpolated_hypersurface_params(input_file):
+    '''
+    Extract the names of the hypersurface parameter names from a file 
+    containing interpolated hypersurfaces without actually loading all of them.
+    
+    This is useful to set up the pi_hypersurfaces stage to get the correct expected
+    parameters without invoking the long loading process. The PISA stage does not
+    have to know about the internal structure of the files.
+    '''
+    assert isinstance(input_file, str)
+    if input_file.endswith("json"):
+        input_data = from_json(input_file)
+        assert set(['map_names', 'interp_params', 'hs_fits']) == set(input_data.keys()), 'incorrect data structure'
+        assert isinstance(input_data['interp_params'], list), 'interpolated parameters must be given as list, even if only one parameter is given'
+        # use first file as reference
+        reference_file = input_data['hs_fits'][0]['file']
+        # we do need to load one HS collection to extract the names
+        reference_hs_collection = load_hypersurfaces(reference_file)
+        hs_param_names = list(reference_hs_collection.values())[0].param_names
+        int_param_names = [p['name'] for p in input_data['interp_params']]
+    else:
+        raise Exception("unknown file format")
+    return hs_param_names, int_param_names
 
 def load_hypersurfaces(input_file, expected_binning=None) :
     '''
@@ -2240,13 +2536,16 @@ def hypersurface_example() :
     # Define systematic parameters in the hypersurface
     params = [
         HypersurfaceParam( name="foo", func_name="linear", initial_fit_coeffts=[1.], ),
-        HypersurfaceParam( name="bar", func_name="exponential", initial_fit_coeffts=[1.,-1.], ),
+        # the exponential HS function did not reliably recover injected true parameters,
+        # probably due to the degeneracy with the intercept. 
+        HypersurfaceParam( name="bar", func_name="quadratic", initial_fit_coeffts=[.1, .1], ),
     ]
 
     # Create the hypersurface
     hypersurface = Hypersurface( 
         params=params, # Specify the systematic parameters
         initial_intercept=1., # Intercept value (or first guess for fit)
+        log=False,
     )
 
 
@@ -2283,18 +2582,18 @@ def hypersurface_example() :
     # Create a dummy "true" hypersurface that can be used to generate some fake bin values for the dataset 
     true_hypersurface = copy.deepcopy(hypersurface)
     true_hypersurface._init(binning=binning, nominal_param_values=nom_param_values)
-    true_hypersurface.intercept.fill(3.)
+    true_hypersurface.intercept.fill(10.)
     if "foo" in true_hypersurface.params :
         true_hypersurface.params["foo"].fit_coeffts[...,0].fill(2.)
     if "bar" in true_hypersurface.params :
-        true_hypersurface.params["bar"].fit_coeffts[...,0].fill(5.)
-        true_hypersurface.params["bar"].fit_coeffts[...,1].fill(-0.1)
+        true_hypersurface.params["bar"].fit_coeffts[...,0].fill(-.1)
+        true_hypersurface.params["bar"].fit_coeffts[...,1].fill(0.05)
 
     logging.info("Truth hypersurface report:\n%s" % str(true_hypersurface) )
 
     # Create each dataset, e.g. set the systematic parameter values, calculate a bin count
     hist = true_hypersurface.evaluate(nom_param_values)
-    nom_map = Map(name=particle_key,binning=binning,hist=hist,error_hist=np.sqrt(hist))
+    nom_map = Map(name=particle_key,binning=binning,hist=hist, error_hist=np.sqrt(hist))
     sys_maps = []
     sys_param_values = []
     for i in range(num_sys_datasets) :
@@ -2315,7 +2614,7 @@ def hypersurface_example() :
         sys_param_values=sys_param_values,
         norm=False,
     )
-
+   
     # Report the results
     logging.info("Fitted hypersurface report:\n%s" % hypersurface)
 
@@ -2326,8 +2625,6 @@ def hypersurface_example() :
     for param_name in hypersurface.param_names :
         assert np.allclose( hypersurface.params[param_name].fit_coeffts, true_hypersurface.params[param_name].fit_coeffts )
     logging.info("... fit was successful!")
-
-    print(hypersurface.evaluate(nom_param_values, return_uncertainty=True))
 
     #
     # Save/load
@@ -2346,7 +2643,17 @@ def hypersurface_example() :
     for param_name in hypersurface.param_names :
         assert np.allclose( hypersurface.params[param_name].fit_coeffts, reloaded_hypersurface.params[param_name].fit_coeffts )
     logging.info("... save+re-load was successful!")
-
+    
+    # test getting and setting coefficients
+    coeffts = hypersurface.fit_coeffts
+    reloaded_hypersurface.fit_coeffts = coeffts
+    logging.info("Checking hypersurfaces are identical after getting and setting coeffts...")
+    assert np.allclose(hypersurface.intercept, reloaded_hypersurface.intercept)
+    for param_name in hypersurface.param_names:
+        assert np.allclose(hypersurface.params[param_name].fit_coeffts,
+                           reloaded_hypersurface.params[param_name].fit_coeffts)
+    logging.info("... setting and getting coefficients was successful!")
+    
     # Continue with the reloaded version
     hypersurface = reloaded_hypersurface
 
