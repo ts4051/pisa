@@ -839,7 +839,7 @@ class ParamSet(Sequence):
             if isinstance(val, Param):
                 assert val.name == attr
                 self._params[idx] = val
-            elif isbarenumeric(val):
+            elif isinstance(val, ureg.Quantity):
                 self._params[idx].value = val
             else:
                 raise ValueError('Cannot set param "%s" to `val`=%s'
