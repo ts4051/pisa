@@ -34,6 +34,7 @@ def is_psd(A):
     N.J. Higham, "Computing a nearest symmetric positive semidefinite
     matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
     '''
+    # pylint: disable=invalid-name
     try:
         _ = np.linalg.cholesky(A)
         return True
@@ -62,6 +63,7 @@ def fronebius_nearest_psd(A, return_distance=False):
             This can be compared to the actual Frobenius norm between the
             input and output to verify the calculation.
     '''
+    # pylint: disable=invalid-name
     assert A.ndim == 2, "input is not a 2D matrix"
     B = (A + A.T)/2.
     _, H = lin.polar(B)
@@ -83,12 +85,15 @@ def fronebius_nearest_psd(A, return_distance=False):
     if return_distance:
         C = (A - A.T)/2.
         lam = lin.eigvalsh(B)
+        # pylint doesn't know that numpy.sum takes the "where" argument
+        # pylint: disable=unexpected-keyword-arg
         dist = np.sqrt(np.sum(lam**2, where=lam < 0.) + lin.norm(C, ord='fro')**2)
         return X, dist
     return X
 
 def test_frob_psd(A):
     '''Test approximation of Frobenius-closest PSD on given matrix'''
+    # pylint: disable=invalid-name
     X, xdist = fronebius_nearest_psd(A, return_distance=True)
     is_psd_after = is_psd(X)
     actual_dist = lin.norm(A - X, ord='fro')
