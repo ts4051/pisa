@@ -1856,7 +1856,6 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
         An example for data in a JSON file for 2D splines in mass splitting 
         and mixing angle is as follows::
             {
-                'map_names': ['numu_cc', 'nutau_cc', ...], # must match hypersurfaces
                 'interp_params': [
                                     {'name': 'deltam31',
                                      'unit': 'electronvolt ** 2'
@@ -1899,22 +1898,26 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
         assert is_binning(expected_binning)
     if input_file.endswith("json"):
         input_data = from_json(input_file)
-        assert set(['map_names', 'interp_params', 'hs_fits']) == set(input_data.keys()), 'incorrect data structure'
+        assert set(['interp_params', 'hs_fits']).issubset(set(input_data.keys())), 'missing keys'
         assert isinstance(input_data['interp_params'], list), 'interpolated parameters must be given as list, even if only one parameter is given'
-        keys = input_data['map_names']
+        map_names = None
         output = collections.OrderedDict()
         loaded_hs_collections = []
         logging.info("Loading hypersurfaces for interpolation...")
         for hs_fit in input_data['hs_fits']:
             fit_dict = {'param_values': hs_fit['param_values']}
             fit_dict['hs_collection'] = load_hypersurfaces(hs_fit['file'], expected_binning=expected_binning)
+            if map_names is None:
+                map_names = list(fit_dict['hs_collection'].keys())
+            else:
+                assert set(map_names) == set(fit_dict['hs_collection'].keys()), "inconsistent maps"
             loaded_hs_collections.append(fit_dict)
-        logging.info("hypersurface file readout completed!")
-        for k in keys:
+        logging.info(f"Read hypersurface maps: {map_names}")
+        for m in map_names:
             hs_fits = [{'param_values': fd['param_values'],
-                        'hypersurface': fd['hs_collection'][k]}
+                        'hypersurface': fd['hs_collection'][m]}
                         for fd in loaded_hs_collections]
-            output[k] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits)
+            output[m] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits)
     else:
         raise Exception("unknown file format")
     return output
