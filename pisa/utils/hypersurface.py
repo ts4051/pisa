@@ -195,12 +195,11 @@ class HypersurfaceInterpolator(object):
     """Factory for interpolated hypersurfaces.
     
     After being initialized with a set of hypersurface fits produced at different
-    parameters, it uses spline interpolation to produce a Hypersurface object
+    parameters, it uses interpolation to produce a Hypersurface object
     at a given point in parameter space.
     
-    Note that the splines are *not* guaranteed to pass through the knots provided
-    by the user, unless a :obj:`UnivariateSpline` is used where smoothing can be 
-    forced to zero with keyword argument ``s = 0``.
+    By default, piecewise linear interpolation is used, but cubic and quintic splines
+    are also supported.
     
     Parameters
     ----------
@@ -225,11 +224,27 @@ class HypersurfaceInterpolator(object):
         `param_values` must be given as quantities in units that can be converted
         to the units given in `interp_params`. During evaluation, units are 
         converted as necessary.
-    **spline_kw :
-        keyword arguments passed to ``interpolate.UnivariateSpline``
-        or ``interpolate.SmoothBivariateSpline`` depending on dimensionality
+    kind : :obj:`str` or int, optional
+        kind of interpolation used in ``interpolate.interp1d``
+        or ``interpolate.interp2d`` depending on dimensionality.
+        Default is 'linear'. Note that kinds supported by ``interp1d`` differ
+        from those supported by ``interp2d``.
+    
+    Notes
+    -----
+    Be sure to give a support that covers the entire relevant parameter range and a 
+    good distance beyond! To prevent minimization failure from NaNs, extrapolation
+    is used if hypersurfaces outside the support are requested but needless to say 
+    these numbers are unreliable.
+    
+    See Also
+    --------
+    scipy.interpolate.interp1d :
+        class used for interpolation with one parameter
+    scipy.interpolate.interp2d :
+        class used for interpolation with two parameters
     """
-    def __init__(self, interp_params, hs_fits, **spline_kw):
+    def __init__(self, interp_params, hs_fits, kind='linear'):
         self.ndim = len(interp_params)
         assert self.ndim in [1, 2], "can only work in either one or two dimensions"
         self.interp_params = interp_params
@@ -258,8 +273,10 @@ class HypersurfaceInterpolator(object):
         self.covars = np.empty(reference_hs.fit_cov_mat.shape, dtype=object)
         names = [p['name'] for p in self.interp_params]
         units = [p['unit'] for p in self.interp_params]
-        # We store the original points that went into the spline fit
-        # only for diagnostic purposes.
+        # We store the original points that went into the interpolation.
+        # Note that we use the keyword argument "copy=False" in the interpolation
+        # initialization below, so that the interpolation contains only references
+        # to the values stored here.
         self._x = []
         if self.ndim == 2:
             self._y = []
@@ -273,20 +290,35 @@ class HypersurfaceInterpolator(object):
             for i, f in enumerate(hs_fits):
                 self._coeff_z[idx][i] = f['hypersurface'].fit_coeffts[idx]
             if self.ndim == 1:
-                self.coefficients[idx] = interpolate.UnivariateSpline(self._x, self._coeff_z[idx], **spline_kw)
+                # TODO: Use numpy if kind is 'linear'
+                self.coefficients[idx] = interpolate.interp1d(self._x, self._coeff_z[idx],
+                                                              copy=False,
+                                                              fill_value='extrapolate',
+                                                              kind=kind,
+                                                             )
             elif self.ndim == 2:
-                self.coefficients[idx] = interpolate.SmoothBivariateSpline(self._x, self._y, 
-                                                                           self._coeff_z[idx], **spline_kw)
+                self.coefficients[idx] = interpolate.interp2d(self._x, self._y,
+                                                              self._coeff_z[idx],
+                                                              copy=False,
+                                                              kind=kind
+                                                             )
         # dimension is [binning..., fit coeffts, fit coeffts, number of fits]
         self._covar_z = np.zeros(self.covars.shape + (len(hs_fits),))
         for idx in np.ndindex(self.covars.shape):
             for i, f in enumerate(hs_fits):
                 self._covar_z[idx][i] = f['hypersurface'].fit_cov_mat[idx]
             if self.ndim == 1:
-                self.covars[idx] = interpolate.UnivariateSpline(self._x, self._covar_z[idx], **spline_kw)
+                self.covars[idx] = interpolate.interp1d(self._x, self._covar_z[idx],
+                                                        copy=False,
+                                                        fill_value='extrapolate',
+                                                        kind=kind,
+                                                       )
             elif self.ndim == 2:
-                self.covars[idx] = interpolate.SmoothBivariateSpline(self._x, self._y,
-                                                                     self._covar_z[idx], **spline_kw)
+                self.covars[idx] = interpolate.interp2d(self._x, self._y, 
+                                                        self._covar_z[idx],
+                                                        copy=False,
+                                                        kind=kind,
+                                                       )
         # In order not to spam warnings, we only want to warn about non positive
         # semi definite covariance matrices once for each bin. We store the bin
         # indeces for which the warning has already been issued. 
@@ -1854,8 +1886,10 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
     input_file : str
         A JSON input file containing paths to the fitted hypersurfaces.
         An example for data in a JSON file for 2D splines in mass splitting 
-        and mixing angle is as follows::
+        and mixing angle is below. The 'kind' keyword is optional, but recommended
+        for reproducibility::
             {
+                'kind': 'linear',
                 'interp_params': [
                                     {'name': 'deltam31',
                                      'unit': 'electronvolt ** 2'
@@ -1867,14 +1901,14 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
                 'hs_fits': [
                                 {
                                  'param_values': {
-                                                    'deltam31': 2.*ureg.eV**2,
+                                                    'deltam31': 2e-3*ureg.eV**2,
                                                     'theta23': 40.*ureg.degree
                                                  },
                                  'file': '/hypersurface/fit/file1.json'
                                 },
                                 {
                                  'param_values': {
-                                                    'deltam31': 3.*ureg.eV**2,
+                                                    'deltam31': 3e-3*ureg.eV**2,
                                                     'theta23': 45.*ureg.degree
                                                  },
                                  'file': '/hypersurface/fit/file2.json'
@@ -1917,7 +1951,10 @@ def load_interpolated_hypersurfaces(input_file, expected_binning=None):
             hs_fits = [{'param_values': fd['param_values'],
                         'hypersurface': fd['hs_collection'][m]}
                         for fd in loaded_hs_collections]
-            output[m] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits)
+            if 'kind' in input_data.keys():
+                output[m] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits, kind=input_data['kind'])
+            else:
+                output[m] = HypersurfaceInterpolator(input_data['interp_params'], hs_fits)
     else:
         raise Exception("unknown file format")
     return output
