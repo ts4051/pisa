@@ -1982,7 +1982,7 @@ def extract_interpolated_hypersurface_params(input_file):
     assert isinstance(input_file, str)
     if input_file.endswith("json"):
         input_data = from_json(input_file)
-        assert set(['map_names', 'interp_params', 'hs_fits']) == set(input_data.keys()), 'incorrect data structure'
+        assert set(['interp_params', 'hs_fits']).issubset(set(input_data.keys())), 'missing keys'
         assert isinstance(input_data['interp_params'], list), 'interpolated parameters must be given as list, even if only one parameter is given'
         # use first file as reference
         reference_file = input_data['hs_fits'][0]['file']
