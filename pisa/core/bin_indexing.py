@@ -3,8 +3,6 @@ Functions to retrieve the bin location of each elements
 of an array, inside a Container, based on its specified 
 output binning.
 
-Etienne Bourbeau
-
 functions were adapted from translation.py
 
 """
@@ -21,10 +19,7 @@ from pisa.utils.numba_tools import myjit, WHERE
 from pisa.utils import vectorizer
 
 __all__ = [
-    'histogram',
-    'lookup',
-    'resample',
-]
+    'lookup_indices']
 
 
 # ---------- Lookup methods ---------------
@@ -43,14 +38,12 @@ def lookup_indices(sample, binning):
 
     Notes
     -----
-    this is only a 2d method right now
+    this method works for 1d, 2d and 3d histogram only
 
     """
-    #print(binning)
     assert binning.num_dims in [1,2,3], 'can only do 1d, 2d and 3d at the moment'
 
     bin_edges = [edges.magnitude for edges in binning.bin_edges]
-    # todo: directly return smart array
 
     array = SmartArray(np.zeros_like(sample[0]))
 
@@ -101,7 +94,6 @@ def find_index(x, bin_edges):
 
     direct transformations instead of search
     """
-    # TODO: support lin and log binnings with
 
     first = 0
     last = len(bin_edges) - 1
