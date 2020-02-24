@@ -5,6 +5,29 @@ output binning.
 
 functions were adapted from translation.py
 
+
+NOTE:
+----
+
+binning convention in pisa is that both lower and upper
+bounds of an inner bin edges is included in the lower bin
+
+first bin is bin 0
+
+last bin is bin NBins -1
+
+bounds falling on the lowest bin edge is included in bin 0
+
+bounds falling in the highest bin edge is included in bin Nbins
+
+values falling below the lowest edge have index -1
+
+values falling above the highest edge have index Nbins
+
+if a value falls on an inner edge, it is included in the lowest
+bin bound by that edge
+
+
 """
 
 from __future__ import absolute_import, print_function, division
@@ -20,8 +43,7 @@ from pisa.utils import vectorizer
 
 from translation import find_index
 
-__all__ = [
-    'lookup_indices']
+__all__ = ['lookup_indices']
 
 
 # ---------- Lookup methods ---------------
@@ -102,11 +124,22 @@ else:
 def lookup_index_vectorized_1d(sample_x, bin_edges_x, indices):
     sample_x_ = sample_x[0]
 
-    if (sample_x_ >= bin_edges_x[0] and sample_x_ <= bin_edges_x[-1]):
+    if (sample_x_ >= bin_edges_x[0] and sample_x_ < bin_edges_x[-1]):
         idx = find_index(sample_x_, bin_edges_x)
         indices[0] = idx
     else:
-        indices[0] = 0.
+
+        # Define underflow bin to be -1
+        if sample_x_<bin_edges_x[0]:
+            indices[0] = -1
+
+        # Define overflow bin to be nbins 
+        elif sample_x_>=bin_edges_x[-1]:
+            indices[0] = len(bin_edges_x)-1
+
+        else:
+            print('something is wrong in the logic')
+            raise Exception
 
 #-----------------------------------------------------------------------
 # Numba vectorized functions
@@ -122,15 +155,31 @@ def lookup_index_vectorized_2d(sample_x, sample_y, bin_edges_x, bin_edges_y, ind
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
+            and sample_x_ < bin_edges_x[-1]
             and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]):
+            and sample_y_ < bin_edges_y[-1]):
         idx_x = find_index(sample_x_, bin_edges_x)
         idx_y = find_index(sample_y_, bin_edges_y)
+
         idx = idx_x*(len(bin_edges_y)-1) + idx_y
+
         indices[0] = idx
     else:
-        indices[0] = 0.
+        
+        # Define underflow bin to be -1
+        if sample_x_<bin_edges_x[0] or sample_y_<bin_edges_y[0]:
+
+            indices[0] = -1
+
+        # Define overflow bin to be nbins
+        elif sample_x_>=bin_edges_x[-1] or sample_y_>=bin_edges_y[-1]:
+
+            indices[0] = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)
+
+        else:
+            print('something is wrong in the logic')
+            raise Exception
+
 
 
 
@@ -147,18 +196,30 @@ def lookup_index_vectorized_3d(sample_x, sample_y, sample_z,  bin_edges_x, bin_e
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
     if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
+            and sample_x_ < bin_edges_x[-1]
             and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]
+            and sample_y_ < bin_edges_y[-1]
             and sample_z_ >= bin_edges_z[0]
-            and sample_z_ <= bin_edges_z[-1]):
+            and sample_z_ < bin_edges_z[-1]):
         idx_x = find_index(sample_x_, bin_edges_x)
         idx_y = find_index(sample_y_, bin_edges_y)
         idx_z = find_index(sample_z_, bin_edges_z)
         idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
         indices[0] = idx
     else:
-        indices[0] = 0.
+
+        # Define underflow bin to be -1
+        if sample_x_<bin_edges_x[0] or sample_y_<bin_edges_y[0] or sample_z_<bin_edges_z[0]:
+            indices[0] = -1
+
+        # Define overflow bin to be nbins 
+        elif sample_x_>=bin_edges_x[-1] or sample_y_>=bin_edges_y[-1] or sample_z_>=bin_edges_z[-1]:
+            
+            indices[0] = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)*(len(bin_edges_z)-1)
+
+        else:
+            print('something is wrong in the logic')
+            raise Exception
 
 
 
@@ -167,10 +228,15 @@ def lookup_index_vectorized_3d(sample_x, sample_y, sample_z,  bin_edges_x, bin_e
 
 def test_lookup_indices():
     """Unit tests for `histogram` function"""
+
+    #
+    # Test a variety of points. 
+    # Points falling exactly on the bound are included in the 
+    # 
     n_evts = 100
-    x = np.array([1,1,1,1,1,3,4,5,6,7], dtype=FTYPE)
-    y = np.array([2,2,2,2,2,3,3,3,3,3], dtype=FTYPE)
-    z = np.array([0,0,0,0,1,0,0,0,0,0], dtype=FTYPE)
+    x = np.array([-5, 0.5, 1.5, 7.0, 6.5, 8.0, 6.5], dtype=FTYPE)
+    y = np.array([-5, 0.5, 1.5, 1.5, 3.0, 1.5, 2.5], dtype=FTYPE)
+    z = np.array([-5, 0.5, 1.5, 1.5, 0.5, 6.0, 0.5], dtype=FTYPE)
 
     w = np.ones(n_evts, dtype=FTYPE)
 
@@ -181,8 +247,8 @@ def test_lookup_indices():
     w = SmartArray(w)
 
     binning_x = OneDimBinning(name='x', num_bins=7, is_lin=True, domain=[0, 7])
-    binning_y = OneDimBinning(name='y', num_bins=3, is_lin=True, domain=[0, 4])
-    binning_z = OneDimBinning(name='z', num_bins=2, is_lin=True, domain=[0, 1])
+    binning_y = OneDimBinning(name='y', num_bins=4, is_lin=True, domain=[0, 4])
+    binning_z = OneDimBinning(name='z', num_bins=2, is_lin=True, domain=[0, 2])
     
     binning_1d = MultiDimBinning([binning_x])
     binning_2d = MultiDimBinning([binning_x, binning_y])
@@ -190,25 +256,44 @@ def test_lookup_indices():
 
 
     # 1D case: check that each event falls into its predicted bin
+    #
+    # All values higher or equal to the last bin edges are assigned an index of zero
+    #
     print('TEST 1D:')
-    print('array in 1D: ',x.get(WHERE),'\nBinning: ',binning_1d.bin_edges)
+    print('Total number of bins: ',7)
+    print('array in 1D: ',x.get(WHERE),'\nBinning: ',(binning_1d.bin_edges[0]))
     indices = lookup_indices([x], binning_1d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,1,7,6,7,6]))
 
     # 2D case:
+    #
+    # The binning edges are flattened as follow: [(x=0,y=0),(x=0,y=1),(x=1,y=0),...]
+    #
     print('TEST 2D:')
+    print('Total number of bins: ',7*4)
     print('array in 2D: ',[(i,j) for i,j in zip(x.get(WHERE),y.get(WHERE))],'\nBinning: ',binning_2d.bin_edges)
     indices = lookup_indices([x,y], binning_2d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,5,28,27,28,26]))
 
     # 3D case:
+    #
+    # the binning edges are flattened as follow: [(x=0,y=0,z=0),(x=0,y=0,z=1),(x=0,y=1,z=0)...]
+    #
     print('TEST 3D:')
+    print('Total number of bins: ',7*4*2)
     print('array in 3D: ',[(i,j,k) for i,j,k in zip(x.get(WHERE),y.get(WHERE),z.get(WHERE))],'\nBinning: ',binning_3d.bin_edges)
     indices = lookup_indices([x,y,z], binning_3d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,11,56,54,56,52]))
+
+
+
+
 
     logging.info('<< PASS : test_histogram >>')
 

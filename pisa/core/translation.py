@@ -367,7 +367,7 @@ def find_index(x, bin_edges):
     while first <= last:
         i = int((first + last)/2)
         if x >= bin_edges[i]:
-            if (x < bin_edges[i+1]) or (x <= bin_edges[-1] and i == len(bin_edges) - 1):
+            if (x <= bin_edges[-1] and i == len(bin_edges) - 1) or x < bin_edges[i+1]:#(x < bin_edges[i+1]) or (x <= bin_edges[-1] and i == len(bin_edges) - 1):
                 break
             else:
                 first = i + 1
