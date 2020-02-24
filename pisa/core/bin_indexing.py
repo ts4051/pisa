@@ -15,8 +15,10 @@ from numba import guvectorize, SmartArray, cuda
 from pisa import FTYPE, TARGET
 from pisa.core.binning import OneDimBinning, MultiDimBinning
 from pisa.utils.log import logging, set_verbosity
-from pisa.utils.numba_tools import myjit, WHERE
+from pisa.utils.numba_tools import WHERE
 from pisa.utils import vectorizer
+
+from translation import find_index
 
 __all__ = [
     'lookup_indices']
@@ -86,27 +88,7 @@ def lookup_indices(sample, binning):
     array.mark_changed(WHERE)
     return array
 
-#----------------------------------------------------
 
-@myjit
-def find_index(x, bin_edges):
-    """simple binary search
-
-    direct transformations instead of search
-    """
-
-    first = 0
-    last = len(bin_edges) - 1
-    while first <= last:
-        i = int((first + last)/2)
-        if x >= bin_edges[i]:
-            if (x < bin_edges[i+1]) or (x <= bin_edges[-1] and i == len(bin_edges) - 1):
-                break
-            else:
-                first = i + 1
-        else:
-            last = i - 1
-    return i
 
 #-----------------------------------------------------------------------
 # Numba vectorized functions
@@ -183,7 +165,7 @@ def lookup_index_vectorized_3d(sample_x, sample_y, sample_z,  bin_edges_x, bin_e
 
 
 
-def test_histogram():
+def test_lookup_indices():
     """Unit tests for `histogram` function"""
     n_evts = 100
     x = np.array([1,1,1,1,1,3,4,5,6,7], dtype=FTYPE)
@@ -232,4 +214,4 @@ def test_histogram():
 
 if __name__ == '__main__':
     set_verbosity(1)
-    test_histogram()
+    test_lookup_indices()
