@@ -123,9 +123,9 @@ else:
 @guvectorize(_SIGNATURE, '(),(j)->()', target=TARGET)
 def lookup_index_vectorized_1d(sample_x, bin_edges_x, indices):
     sample_x_ = sample_x[0]
-
     idx = find_index(sample_x_, bin_edges_x)
     indices[0] = idx
+
 
 
 #-----------------------------------------------------------------------
