@@ -1,27 +1,6 @@
 # pylint: disable = unsubscriptable-object, too-many-function-args, not-callable, unexpected-keyword-arg, no-value-for-parameter
 """
 Module for data representation translation methods
-
-NOTE:
-----
-
-binning convention in pisa is that both lower and upper
-bounds of an inner bin edges is included in the lower bin
-
-first bin is bin 0
-
-last bin is bin (NBins -1)
-
-bounds falling on the lowest bin edge is included in bin 0
-
-bounds falling in the highest bin edge is included in bin Nbins
-
-values falling below the lowest edge have index -1
-
-values falling above the highest edge have index Nbins
-
-if a value falls on an inner edge, it is included in the lowest
-bin bound by that edge
 """
 
 # TODO:
@@ -420,15 +399,17 @@ def lookup_vectorized_2d(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y
     """Vectorized gufunc to perform the lookup"""
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
-    idx_x = find_index(sample_x_, bin_edges_x)
-    idx_y = find_index(sample_y_, bin_edges_y)
 
-    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)):
-        weights[0] = 0.
-    else:
+    if (sample_x_ >= bin_edges_x[0]
+            and sample_x_ <= bin_edges_x[-1]
+            and sample_y_ >= bin_edges_y[0]
+            and sample_y_ <= bin_edges_y[-1]):
+        idx_x = find_index(sample_x_, bin_edges_x)
+        idx_y = find_index(sample_y_, bin_edges_y)
         idx = idx_x*(len(bin_edges_y)-1) + idx_y
         weights[0] = flat_hist[idx]
-
+    else:
+        weights[0] = 0.
 
 
 if FTYPE == np.float32:
@@ -443,18 +424,18 @@ def lookup_vectorized_2d_arrays(sample_x, sample_y, flat_hist, bin_edges_x, bin_
     """
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
-    idx_x = find_index(sample_x_, bin_edges_x)
-    idx_y = find_index(sample_y_, bin_edges_y)
-
-    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)):
-        for i in range(weights.size):
-            weights[i] = 0.
-    else:
+    if (sample_x_ >= bin_edges_x[0]
+            and sample_x_ <= bin_edges_x[-1]
+            and sample_y_ >= bin_edges_y[0]
+            and sample_y_ <= bin_edges_y[-1]):
+        idx_x = find_index(sample_x_, bin_edges_x)
+        idx_y = find_index(sample_y_, bin_edges_y)
         idx = idx_x*(len(bin_edges_y)-1) + idx_y
         for i in range(weights.size):
             weights[i] = flat_hist[idx, i]
-
-
+    else:
+        for i in range(weights.size):
+            weights[i] = 0.
 
 
 if FTYPE == np.float32:
@@ -468,17 +449,19 @@ def lookup_vectorized_3d(sample_x, sample_y, sample_z, flat_hist, bin_edges_x, b
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
-    idx_x = find_index(sample_x_, bin_edges_x)
-    idx_y = find_index(sample_y_, bin_edges_y)
-    idx_z = find_index(sample_z_, bin_edges_z)
-
-    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)) or (idx_z in (-1,len(bin_edges_z)-1)):
-        weights[i] = 0.
-
-    else:
+    if (sample_x_ >= bin_edges_x[0]
+            and sample_x_ <= bin_edges_x[-1]
+            and sample_y_ >= bin_edges_y[0]
+            and sample_y_ <= bin_edges_y[-1]
+            and sample_z_ >= bin_edges_z[0]
+            and sample_z_ <= bin_edges_z[-1]):
+        idx_x = find_index(sample_x_, bin_edges_x)
+        idx_y = find_index(sample_y_, bin_edges_y)
+        idx_z = find_index(sample_z_, bin_edges_z)
         idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
         weights[0] = flat_hist[idx]
-        
+    else:
+        weights[0] = 0.
 
 
 if FTYPE == np.float32:
@@ -493,18 +476,21 @@ def lookup_vectorized_3d_arrays(sample_x, sample_y, sample_z, flat_hist, bin_edg
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
-    idx_x = find_index(sample_x_, bin_edges_x)
-    idx_y = find_index(sample_y_, bin_edges_y)
-    idx_z = find_index(sample_z_, bin_edges_z)
-
-    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)) or (idx_z in (-1,len(bin_edges_z)-1)):
+    if (sample_x_ >= bin_edges_x[0]
+            and sample_x_ <= bin_edges_x[-1]
+            and sample_y_ >= bin_edges_y[0]
+            and sample_y_ <= bin_edges_y[-1]
+            and sample_z_ >= bin_edges_z[0]
+            and sample_z_ <= bin_edges_z[-1]):
+        idx_x = find_index(sample_x_, bin_edges_x)
+        idx_y = find_index(sample_y_, bin_edges_y)
+        idx_z = find_index(sample_z_, bin_edges_z)
+        idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
         for i in range(weights.size):
-            weights[i] = 0.
+            weights[i] = flat_hist[idx, i]
     else:
         for i in range(weights.size):
-            idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
-            weights[i] = flat_hist[idx, i]
-
+            weights[i] = 0.
 
 
 def test_histogram():
@@ -533,14 +519,14 @@ def test_histogram():
 
     logging.info('<< PASS : test_histogram >>')
 
-
-def test_find_index():
-    '''
-    Testing find_index 
-    '''
-
+def test_indices():
+    #
+    # Testing find_index 
+    #
     bin_edges = np.array([0.,1.,2.,3.,4.])
+
     test_value = np.array([-3.,0.,1.,3.5,2.,3.,4.,4.5])
+
     expected_indices = np.array([-1,0,0,3,1,2,3,4])
     indices = [find_index(x,bin_edges) for x in test_value]
 
@@ -551,5 +537,8 @@ def test_find_index():
 
 if __name__ == '__main__':
     set_verbosity(1)
-    test_find_index()
+    test_indices()
     test_histogram()
+
+
+
