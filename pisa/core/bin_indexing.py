@@ -14,7 +14,7 @@ bounds of an inner bin edges is included in the lower bin
 
 first bin is bin 0
 
-last bin is bin NBins -1
+last bin is bin (NBins -1)
 
 bounds falling on the lowest bin edge is included in bin 0
 

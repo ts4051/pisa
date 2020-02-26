@@ -420,17 +420,15 @@ def lookup_vectorized_2d(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y
     """Vectorized gufunc to perform the lookup"""
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
 
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
+    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)):
+        weights[0] = 0.
+    else:
         idx = idx_x*(len(bin_edges_y)-1) + idx_y
         weights[0] = flat_hist[idx]
-    else:
-        weights[0] = 0.
+
 
 
 if FTYPE == np.float32:
@@ -445,18 +443,18 @@ def lookup_vectorized_2d_arrays(sample_x, sample_y, flat_hist, bin_edges_x, bin_
     """
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
+
+    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)):
+        for i in range(weights.size):
+            weights[i] = 0.
+    else:
         idx = idx_x*(len(bin_edges_y)-1) + idx_y
         for i in range(weights.size):
             weights[i] = flat_hist[idx, i]
-    else:
-        for i in range(weights.size):
-            weights[i] = 0.
+
+
 
 
 if FTYPE == np.float32:
@@ -470,19 +468,17 @@ def lookup_vectorized_3d(sample_x, sample_y, sample_z, flat_hist, bin_edges_x, b
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]
-            and sample_z_ >= bin_edges_z[0]
-            and sample_z_ <= bin_edges_z[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
-        idx_z = find_index(sample_z_, bin_edges_z)
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
+    idx_z = find_index(sample_z_, bin_edges_z)
+
+    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)) or (idx_z in (-1,len(bin_edges_z)-1)):
+        weights[i] = 0.
+
+    else:
         idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
         weights[0] = flat_hist[idx]
-    else:
-        weights[0] = 0.
+        
 
 
 if FTYPE == np.float32:
@@ -497,21 +493,18 @@ def lookup_vectorized_3d_arrays(sample_x, sample_y, sample_z, flat_hist, bin_edg
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ <= bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ <= bin_edges_y[-1]
-            and sample_z_ >= bin_edges_z[0]
-            and sample_z_ <= bin_edges_z[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
-        idx_z = find_index(sample_z_, bin_edges_z)
-        idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
-        for i in range(weights.size):
-            weights[i] = flat_hist[idx, i]
-    else:
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
+    idx_z = find_index(sample_z_, bin_edges_z)
+
+    if (idx_x in (-1,len(bin_edges_x)-1)) or (idx_y in (-1,len(bin_edges_y)-1)) or (idx_z in (-1,len(bin_edges_z)-1)):
         for i in range(weights.size):
             weights[i] = 0.
+    else:
+        for i in range(weights.size):
+            idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
+            weights[i] = flat_hist[idx, i]
+
 
 
 def test_histogram():
