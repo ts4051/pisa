@@ -1,6 +1,27 @@
 # pylint: disable = unsubscriptable-object, too-many-function-args, not-callable, unexpected-keyword-arg, no-value-for-parameter
 """
 Module for data representation translation methods
+
+NOTE:
+----
+
+binning convention in pisa is that both lower and upper
+bounds of an inner bin edges is included in the lower bin
+
+first bin is bin 0
+
+last bin is bin (NBins -1)
+
+bounds falling on the lowest bin edge is included in bin 0
+
+bounds falling in the highest bin edge is included in bin Nbins
+
+values falling below the lowest edge have index -1
+
+values falling above the highest edge have index Nbins
+
+if a value falls on an inner edge, it is included in the lowest
+bin bound by that edge
 """
 
 # TODO:
@@ -361,18 +382,31 @@ def find_index(x, bin_edges):
     direct transformations instead of search
     """
     # TODO: support lin and log binnings with
-
-    first = 0
-    last = len(bin_edges) - 1
-    while first <= last:
-        i = int((first + last)/2)
-        if x >= bin_edges[i]:
-            if (x <= bin_edges[-1] and i == len(bin_edges) - 1) or x < bin_edges[i+1]:
-                break
+    
+    #
+    # First check: extreme bin
+    #
+    if x<bin_edges[0]:
+        return -1
+    elif x>bin_edges[-1]:
+        return len(bin_edges)-1
+    else:
+        #
+        # Now handle middle cases
+        #
+        first = 0
+        last = len(bin_edges) -1
+        while first <= last:
+            i = int((first + last)/2)
+            if x > bin_edges[i]:
+                
+                if x <= bin_edges[i+1]:
+                    break
+                else:
+                    first = i + 1
             else:
-                first = i + 1
-        else:
-            last = i - 1
+                last = i - 1
+
     return i
 
 
@@ -386,6 +420,7 @@ def lookup_vectorized_2d(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y
     """Vectorized gufunc to perform the lookup"""
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
+
     if (sample_x_ >= bin_edges_x[0]
             and sample_x_ <= bin_edges_x[-1]
             and sample_y_ >= bin_edges_y[0]
@@ -506,6 +541,22 @@ def test_histogram():
     logging.info('<< PASS : test_histogram >>')
 
 
+def test_find_index():
+    '''
+    Testing find_index 
+    '''
+
+    bin_edges = np.array([0.,1.,2.,3.,4.])
+    test_value = np.array([-3.,0.,1.,3.5,2.,3.,4.,4.5])
+    expected_indices = np.array([-1,0,0,3,1,2,3,4])
+    indices = [find_index(x,bin_edges) for x in test_value]
+
+    assert np.array_equal(indices,expected_indices)
+    logging.info('<< PASS : find_index >>')
+
+
+
 if __name__ == '__main__':
     set_verbosity(1)
+    test_find_index()
     test_histogram()

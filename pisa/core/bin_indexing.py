@@ -124,22 +124,9 @@ else:
 def lookup_index_vectorized_1d(sample_x, bin_edges_x, indices):
     sample_x_ = sample_x[0]
 
-    if (sample_x_ >= bin_edges_x[0] and sample_x_ < bin_edges_x[-1]):
-        idx = find_index(sample_x_, bin_edges_x)
-        indices[0] = idx
-    else:
+    idx = find_index(sample_x_, bin_edges_x)
+    indices[0] = idx
 
-        # Define underflow bin to be -1
-        if sample_x_<bin_edges_x[0]:
-            indices[0] = -1
-
-        # Define overflow bin to be nbins 
-        elif sample_x_>=bin_edges_x[-1]:
-            indices[0] = len(bin_edges_x)-1
-
-        else:
-            print('something is wrong in the logic')
-            raise Exception
 
 #-----------------------------------------------------------------------
 # Numba vectorized functions
@@ -154,33 +141,18 @@ def lookup_index_vectorized_2d(sample_x, sample_y, bin_edges_x, bin_edges_y, ind
     """Same as above, except we get back the index"""
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ < bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ < bin_edges_y[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
 
-        idx = idx_x*(len(bin_edges_y)-1) + idx_y
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
+    N = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)
 
-        indices[0] = idx
+    if idx_x==-1 or idx_y==-1:
+        indices[0] = -1
+    elif idx_x==(len(bin_edges_x)-1) or idx_y==(len(bin_edges_y)-1):
+        indices[0] = N
     else:
-        
-        # Define underflow bin to be -1
-        if sample_x_<bin_edges_x[0] or sample_y_<bin_edges_y[0]:
-
-            indices[0] = -1
-
-        # Define overflow bin to be nbins
-        elif sample_x_>=bin_edges_x[-1] or sample_y_>=bin_edges_y[-1]:
-
-            indices[0] = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)
-
-        else:
-            print('something is wrong in the logic')
-            raise Exception
-
-
+        idx = idx_x*(len(bin_edges_y)-1) + idx_y
+        indices[0] = idx
 
 
 
@@ -195,33 +167,18 @@ def lookup_index_vectorized_3d(sample_x, sample_y, sample_z,  bin_edges_x, bin_e
     sample_x_ = sample_x[0]
     sample_y_ = sample_y[0]
     sample_z_ = sample_z[0]
-    if (sample_x_ >= bin_edges_x[0]
-            and sample_x_ < bin_edges_x[-1]
-            and sample_y_ >= bin_edges_y[0]
-            and sample_y_ < bin_edges_y[-1]
-            and sample_z_ >= bin_edges_z[0]
-            and sample_z_ < bin_edges_z[-1]):
-        idx_x = find_index(sample_x_, bin_edges_x)
-        idx_y = find_index(sample_y_, bin_edges_y)
-        idx_z = find_index(sample_z_, bin_edges_z)
+    idx_x = find_index(sample_x_, bin_edges_x)
+    idx_y = find_index(sample_y_, bin_edges_y)
+    idx_z = find_index(sample_z_, bin_edges_z)
+    N = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)*(len(bin_edges_z)-1)
+
+    if idx_x==-1 or idx_y==-1 or idx_z==-1:
+        indices[0] = -1
+    elif idx_x==(len(bin_edges_x)-1) or idx_y==(len(bin_edges_y)-1) or idx_z==(len(bin_edges_z)-1):
+        indices[0] = N
+    else:
         idx = (idx_x*(len(bin_edges_y)-1) + idx_y)*(len(bin_edges_z)-1) + idx_z
         indices[0] = idx
-    else:
-
-        # Define underflow bin to be -1
-        if sample_x_<bin_edges_x[0] or sample_y_<bin_edges_y[0] or sample_z_<bin_edges_z[0]:
-            indices[0] = -1
-
-        # Define overflow bin to be nbins 
-        elif sample_x_>=bin_edges_x[-1] or sample_y_>=bin_edges_y[-1] or sample_z_>=bin_edges_z[-1]:
-            
-            indices[0] = (len(bin_edges_x)-1)*(len(bin_edges_y)-1)*(len(bin_edges_z)-1)
-
-        else:
-            print('something is wrong in the logic')
-            raise Exception
-
-
 
 
 
@@ -234,6 +191,7 @@ def test_lookup_indices():
     # Points falling exactly on the bound are included in the 
     # 
     n_evts = 100
+
     x = np.array([-5, 0.5, 1.5, 7.0, 6.5, 8.0, 6.5], dtype=FTYPE)
     y = np.array([-5, 0.5, 1.5, 1.5, 3.0, 1.5, 2.5], dtype=FTYPE)
     z = np.array([-5, 0.5, 1.5, 1.5, 0.5, 6.0, 0.5], dtype=FTYPE)
@@ -265,7 +223,7 @@ def test_lookup_indices():
     indices = lookup_indices([x], binning_1d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
-    assert np.array_equal(indices.get(WHERE),np.array([-1,0,1,7,6,7,6]))
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,1,6,6,7,6]))
 
     # 2D case:
     #
@@ -277,7 +235,7 @@ def test_lookup_indices():
     indices = lookup_indices([x,y], binning_2d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
-    assert np.array_equal(indices.get(WHERE),np.array([-1,0,5,28,27,28,26]))
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,5,25,26,28,26]))
 
     # 3D case:
     #
@@ -289,7 +247,7 @@ def test_lookup_indices():
     indices = lookup_indices([x,y,z], binning_3d)
     print('indices of each array element:',indices.get(WHERE))
     print('*********************************\n')
-    assert np.array_equal(indices.get(WHERE),np.array([-1,0,11,56,54,56,52]))
+    assert np.array_equal(indices.get(WHERE),np.array([-1,0,11,51,52,56,52]))
 
 
 
