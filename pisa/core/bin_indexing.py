@@ -253,7 +253,7 @@ def test_lookup_indices():
 
 
 
-    logging.info('<< PASS : test_histogram >>')
+    logging.info('<< PASS : test_lookup_indices>>')
 
 if __name__ == '__main__':
     set_verbosity(1)
