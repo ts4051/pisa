@@ -27,6 +27,8 @@ __all__ = [
     'lookup',
     'find_index',
     'resample',
+    'test_histogram',
+    'test_find_index',
 ]
 
 

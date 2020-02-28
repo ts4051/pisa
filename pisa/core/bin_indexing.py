@@ -42,7 +42,7 @@ from pisa.utils.numba_tools import WHERE
 
 from translation import find_index
 
-__all__ = ["lookup_indices"]
+__all__ = ["lookup_indices", "test_lookup_indices"]
 
 
 # ---------- Lookup methods ---------------
