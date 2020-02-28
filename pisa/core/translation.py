@@ -21,9 +21,14 @@ from pisa.utils.numba_tools import myjit, WHERE
 from pisa.utils import vectorizer
 
 __all__ = [
+    'resample',
+    'get_hist',
     'histogram',
     'lookup',
+    'find_index',
     'resample',
+    'test_histogram',
+    'test_find_index',
 ]
 
 
@@ -299,7 +304,7 @@ def lookup(sample, flat_hist, binning):
 
     """
     #print(binning)
-    assert binning.num_dims in [2,3], 'can only do 2d and 3d at the moment'
+    assert binning.num_dims in [2, 3], 'can only do 2d and 3d at the moment'
     bin_edges = [edges.magnitude for edges in binning.bin_edges]
     # todo: directly return smart array
     if flat_hist.ndim == 1:
@@ -361,24 +366,24 @@ def find_index(x, bin_edges):
     direct transformations instead of search
     """
     # TODO: support lin and log binnings with
-    
+
     #
-    # First check: extreme bin
+    # First check: ouside binning
     #
-    if x<bin_edges[0]:
+    if x < bin_edges[0]:
         return -1
-    elif x>bin_edges[-1]:
-        return len(bin_edges)-1
+    elif x > bin_edges[-1]:
+        return len(bin_edges) - 1
     else:
         #
         # Now handle middle cases
         #
         first = 0
-        last = len(bin_edges) -1
+        last = len(bin_edges) - 1
         while first <= last:
             i = int((first + last)/2)
             if x > bin_edges[i]:
-                
+
                 if x <= bin_edges[i+1]:
                     break
                 else:
@@ -394,7 +399,7 @@ if FTYPE == np.float32:
 else:
     _SIGNATURE = ['(f8[:], f8[:], f8[:], f8[:], f8[:], f8[:])']
 
-@guvectorize(_SIGNATURE, '(),(),(j),(k),(l)->()', target=TARGET)
+@guvectorize(_SIGNATURE, '(), (), (j), (k), (l)->()', target=TARGET)
 def lookup_vectorized_2d(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y, weights):
     """Vectorized gufunc to perform the lookup"""
     sample_x_ = sample_x[0]
@@ -413,11 +418,11 @@ def lookup_vectorized_2d(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y
 
 
 if FTYPE == np.float32:
-    _SIGNATURE = ['(f4[:], f4[:], f4[:,:], f4[:], f4[:], f4[:])']
+    _SIGNATURE = ['(f4[:], f4[:], f4[:, :], f4[:], f4[:], f4[:])']
 else:
-    _SIGNATURE = ['(f8[:], f8[:], f8[:,:], f8[:], f8[:], f8[:])']
+    _SIGNATURE = ['(f8[:], f8[:], f8[:, :], f8[:], f8[:], f8[:])']
 
-@guvectorize(_SIGNATURE, '(),(),(j,d),(k),(l)->(d)', target=TARGET)
+@guvectorize(_SIGNATURE, '(), (), (j, d), (k), (l)->(d)', target=TARGET)
 def lookup_vectorized_2d_arrays(sample_x, sample_y, flat_hist, bin_edges_x, bin_edges_y, weights):
     """Vectorized gufunc to perform the lookup while flat hist and weights have
     both a second dimension
@@ -443,7 +448,7 @@ if FTYPE == np.float32:
 else:
     _SIGNATURE = ['(f8[:], f8[:], f8[:], f8[:], f8[:], f8[:], f8[:], f8[:])']
 
-@guvectorize(_SIGNATURE, '(),(),(),(j),(k),(l),(m)->()', target=TARGET)
+@guvectorize(_SIGNATURE, '(), (), (), (j), (k), (l), (m)->()', target=TARGET)
 def lookup_vectorized_3d(sample_x, sample_y, sample_z, flat_hist, bin_edges_x, bin_edges_y, bin_edges_z, weights):
     """Vectorized gufunc to perform the lookup"""
     sample_x_ = sample_x[0]
@@ -465,11 +470,11 @@ def lookup_vectorized_3d(sample_x, sample_y, sample_z, flat_hist, bin_edges_x, b
 
 
 if FTYPE == np.float32:
-    _SIGNATURE = ['(f4[:], f4[:], f4[:], f4[:,:], f4[:], f4[:], f4[:], f4[:])']
+    _SIGNATURE = ['(f4[:], f4[:], f4[:], f4[:, :], f4[:], f4[:], f4[:], f4[:])']
 else:
-    _SIGNATURE = ['(f8[:], f8[:], f8[:], f8[:,:], f8[:], f8[:], f8[:], f8[:])']
+    _SIGNATURE = ['(f8[:], f8[:], f8[:], f8[:, :], f8[:], f8[:], f8[:], f8[:])']
 
-@guvectorize(_SIGNATURE, '(),(),(),(j,d),(k),(l),(m)->(d)', target=TARGET)
+@guvectorize(_SIGNATURE, '(), (), (), (j, d), (k), (l), (m)->(d)', target=TARGET)
 def lookup_vectorized_3d_arrays(sample_x, sample_y, sample_z, flat_hist, bin_edges_x, bin_edges_y, bin_edges_z, weights):
     """Vectorized gufunc to perform the lookup while flat hist and weights have
     both a second dimension"""
@@ -519,26 +524,23 @@ def test_histogram():
 
     logging.info('<< PASS : test_histogram >>')
 
-def test_indices():
+def test_find_index():
+    """Unit tests for `find_index` function"""
     #
-    # Testing find_index 
+    # Testing find_index
     #
-    bin_edges = np.array([0.,1.,2.,3.,4.])
+    bin_edges = np.array([0., 1., 2., 3., 4.])
 
-    test_value = np.array([-3.,0.,1.,3.5,2.,3.,4.,4.5])
+    test_value = np.array([-3., 0., 1., 3.5, 2., 3., 4., 4.5])
 
-    expected_indices = np.array([-1,0,0,3,1,2,3,4])
-    indices = [find_index(x,bin_edges) for x in test_value]
+    expected_indices = np.array([-1, 0, 0, 3, 1, 2, 3, 4])
+    indices = [find_index(x, bin_edges) for x in test_value]
 
-    assert np.array_equal(indices,expected_indices)
-    logging.info('<< PASS : find_index >>')
-
+    assert np.array_equal(indices, expected_indices)
+    logging.info('<< PASS : test_find_index >>')
 
 
 if __name__ == '__main__':
     set_verbosity(1)
-    test_indices()
+    test_find_index()
     test_histogram()
-
-
-
