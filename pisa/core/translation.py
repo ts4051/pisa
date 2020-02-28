@@ -535,7 +535,7 @@ def test_find_index():
     indices = [find_index(x, bin_edges) for x in test_value]
 
     assert np.array_equal(indices, expected_indices)
-    logging.info('<< PASS : find_index >>')
+    logging.info('<< PASS : test_find_index >>')
 
 
 if __name__ == '__main__':

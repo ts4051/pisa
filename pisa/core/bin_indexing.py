@@ -121,9 +121,9 @@ def lookup_indices(sample, binning):
 # Numba vectorized functions
 
 if FTYPE == np.float32:
-    _SIGNATURE = ["(f4[:], f4[:], f4[:])"]
+    _SIGNATURE = ["(f4[:], f4[:], i8[:])"]
 else:
-    _SIGNATURE = ["(f8[:], f8[:], f8[:])"]
+    _SIGNATURE = ["(f8[:], f8[:], i8[:])"]
 
 
 @guvectorize(_SIGNATURE, "(), (j) -> ()", target=TARGET)
@@ -134,9 +134,9 @@ def lookup_index_vectorized_1d(sample_x, bin_edges_x, out):
 
 
 if FTYPE == np.float32:
-    _SIGNATURE = ["(f4[:], f4[:], f4[:], f4[:], f4[:])"]
+    _SIGNATURE = ["(f4[:], f4[:], f4[:], f4[:], i8[:])"]
 else:
-    _SIGNATURE = ["(f8[:], f8[:], f8[:], f8[:], f8[:])"]
+    _SIGNATURE = ["(f8[:], f8[:], f8[:], f8[:], i8[:])"]
 
 
 @guvectorize(_SIGNATURE, "(), (), (j), (k) -> ()", target=TARGET)
@@ -164,9 +164,9 @@ def lookup_index_vectorized_2d(sample_x, sample_y, bin_edges_x, bin_edges_y, out
 
 
 if FTYPE == np.float32:
-    _SIGNATURE = ["(f4[:], f4[:], f4[:], f4[:], f4[:], f4[:], f4[:])"]
+    _SIGNATURE = ["(f4[:], f4[:], f4[:], f4[:], f4[:], f4[:], i8[:])"]
 else:
-    _SIGNATURE = ["(f8[:], f8[:], f8[:], f8[:], f8[:], f8[:], f8[:])"]
+    _SIGNATURE = ["(f8[:], f8[:], f8[:], f8[:], f8[:], f8[:], i8[:])"]
 
 
 @guvectorize(_SIGNATURE, "(), (), (), (j), (k), (l) -> ()", target=TARGET)
@@ -232,13 +232,12 @@ def test_lookup_indices():
     # All values higher or equal to the last bin edges are assigned an index of zero
     #
     logging.trace("TEST 1D:")
-    logging.trace("Total number of bins: ", 7)
-    logging.trace(
-        "array in 1D: ", x.get(WHERE), "\nBinning: ", (binning_1d.bin_edges[0])
-    )
+    logging.trace("Total number of bins: {}".format(7))
+    logging.trace("array in 1D: {}".format(x.get(WHERE)))
+    logging.trace("Binning: {}".format(binning_1d.bin_edges[0]))
     indices = lookup_indices([x], binning_1d)
-    logging.trace("indices of each array element:", indices.get(WHERE))
-    logging.trace("*********************************\n")
+    logging.trace("indices of each array element: {}".format(indices.get(WHERE)))
+    logging.trace("*********************************")
     assert np.array_equal(indices.get(WHERE), np.array([-1, 0, 1, 6, 6, 7, 6]))
 
     # 2D case:
@@ -247,16 +246,16 @@ def test_lookup_indices():
     #   [(x=0, y=0), (x=0, y=1), (x=1, y=0), ...]
     #
     logging.trace("TEST 2D:")
-    logging.trace("Total number of bins: ", 7 * 4)
+    logging.trace("Total number of bins: {}".format(7 * 4))
     logging.trace(
-        "array in 2D: ",
-        [(i, j) for i, j in zip(x.get(WHERE), y.get(WHERE))],
-        "\nBinning: ",
-        binning_2d.bin_edges,
+        "array in 2D: {}".format(
+            [(i, j) for i, j in zip(x.get(WHERE), y.get(WHERE))],
+        )
     )
+    logging.trace("Binning: {}".format(binning_2d.bin_edges))
     indices = lookup_indices([x, y], binning_2d)
-    logging.trace("indices of each array element:", indices.get(WHERE))
-    logging.trace("*********************************\n")
+    logging.trace("indices of each array element: {}".format(indices.get(WHERE)))
+    logging.trace("*********************************")
     assert np.array_equal(indices.get(WHERE), np.array([-1, 0, 5, 25, 26, 28, 26]))
 
     # 3D case:
@@ -265,16 +264,16 @@ def test_lookup_indices():
     #   [(x=0, y=0, z=0), (x=0, y=0, z=1), (x=0, y=1, z=0)...]
     #
     logging.trace("TEST 3D:")
-    logging.trace("Total number of bins: ", 7 * 4 * 2)
+    logging.trace("Total number of bins: {}".format(7 * 4 * 2))
     logging.trace(
-        "array in 3D: ",
-        [(i, j, k) for i, j, k in zip(x.get(WHERE), y.get(WHERE), z.get(WHERE))],
-        "\nBinning: ",
-        binning_3d.bin_edges,
+        "array in 3D: {}".format(
+            [(i, j, k) for i, j, k in zip(x.get(WHERE), y.get(WHERE), z.get(WHERE))]
+        )
     )
+    logging.trace("Binning: {}".format(binning_3d.bin_edges))
     indices = lookup_indices([x, y, z], binning_3d)
-    logging.trace("indices of each array element:", indices.get(WHERE))
-    logging.trace("*********************************\n")
+    logging.trace("indices of each array element: {}".format(indices.get(WHERE)))
+    logging.trace("*********************************")
     assert np.array_equal(indices.get(WHERE), np.array([-1, 0, 11, 51, 52, 56, 52]))
 
     logging.info("<< PASS : test_lookup_indices >>")
