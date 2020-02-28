@@ -55,7 +55,7 @@ def lookup_indices(sample, binning):
     ---------
     sample : list of SmartArrays
 
-    binning : PISA MultiDimBinning
+    binning : pisa.core.binning.OneDimBinning or pisa.core.binning.MultiDimBinning
 
     Returns: for each event the index of the histogram in which it falls into
 
@@ -64,11 +64,19 @@ def lookup_indices(sample, binning):
     this method works for 1d, 2d and 3d histogram only
 
     """
-    assert binning.num_dims in [1, 2, 3], "can only do 1d, 2d and 3d at the moment"
+    if isinstance(binning, OneDimBinning):
+        binning = MultiDimBinning(binning)
+    if not isinstance(binning, MultiDimBinning):
+        raise TypeError(
+            "binning must be OneDimBinning or MultiDimBinning; got {}".format(
+                type(binning)
+            )
+        )
+    assert 1 <= binning.num_dims <= 3, "can only do 1d, 2d and 3d at the moment"
 
     bin_edges = [edges.magnitude for edges in binning.bin_edges]
 
-    array = SmartArray(np.zeros_like(sample[0]))
+    array = SmartArray(np.zeros_like(sample[0], dtype=np.int64))
 
     if binning.num_dims == 1:
 
@@ -223,9 +231,9 @@ def test_lookup_indices():
     binning_y = OneDimBinning(name="y", num_bins=4, is_lin=True, domain=[0, 4])
     binning_z = OneDimBinning(name="z", num_bins=2, is_lin=True, domain=[0, 2])
 
-    binning_1d = MultiDimBinning([binning_x])
-    binning_2d = MultiDimBinning([binning_x, binning_y])
-    binning_3d = MultiDimBinning([binning_x, binning_y, binning_z])
+    binning_1d = binning_x
+    binning_2d = binning_x * binning_y
+    binning_3d = binning_x * binning_y * binning_z
 
     # 1D case: check that each event falls into its predicted bin
     #
@@ -248,9 +256,7 @@ def test_lookup_indices():
     logging.trace("TEST 2D:")
     logging.trace("Total number of bins: {}".format(7 * 4))
     logging.trace(
-        "array in 2D: {}".format(
-            [(i, j) for i, j in zip(x.get(WHERE), y.get(WHERE))],
-        )
+        "array in 2D: {}".format([(i, j) for i, j in zip(x.get(WHERE), y.get(WHERE))])
     )
     logging.trace("Binning: {}".format(binning_2d.bin_edges))
     indices = lookup_indices([x, y], binning_2d)
