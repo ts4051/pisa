@@ -69,6 +69,9 @@ class DistributionMaker(object):
         checked for consistency (you should use multiple `Detector`s if you
         have incompatible data sets).
 
+    skip_services: sequence of 2 strings, sequence of these, or None; optional
+        (service, stage) to skip in the parsing 
+
     Notes
     -----
     Free params with the same name in two pipelines are updated at the same
@@ -85,7 +88,7 @@ class DistributionMaker(object):
     intervals are non-physical.
 
     """
-    def __init__(self, pipelines, label=None, set_livetime_from_data=True, skip_stages=None):
+    def __init__(self, pipelines, label=None, set_livetime_from_data=True, skip_services=None):
 
         self.label = label
         self._source_code_hash = None

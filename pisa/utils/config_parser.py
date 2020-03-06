@@ -215,6 +215,7 @@ default selection they must be separated by commas.
 from __future__ import absolute_import, division
 
 from collections import OrderedDict
+from collections.abc import Sequence
 from io import StringIO
 from os.path import abspath, expanduser, expandvars, isfile, join
 import re
@@ -528,15 +529,15 @@ def parse_param(config, section, selector, fullname, pname, value):
     return param
 
 
-def parse_pipeline_config(config,skip_stages=None):
+def parse_pipeline_config(config, skip_services=None):
     """Parse pipeline config.
 
     Parameters
     ----------
     config : string or ConfigParser
 
-    skip_stages: None or List of Tuples identifying
-                 (service, stage) to skip in the parsing 
+    skip_services: sequence of 2 strings, sequence of these, or None; optional
+        (service, stage) to skip in the parsing 
 
     Returns
     -------
@@ -619,23 +620,48 @@ def parse_pipeline_config(config,skip_stages=None):
 
 
     #
-    # Browse through the list of (service, stage) Tuple to skip, if any
+    # If skip_servies is not None, normalize its format
     #
-    if skip_stages is not None:
-        # Check the types of skip_Stages. must be a list of Tuples
-        assert isinstance(skip_stages,list) and isinstance(skip_stages[0],tuple), 'ERROR: skip_stages must be a list of Tuples'
+    if not (skip_services is None or isinstance(skip_services, Sequence)):
+        raise TypeError(
+            "`skip_services` expected to be None or Sequence, got {}".format(type(skip_services))
+        )
 
-        # reformat order into a list of tuples
-        order = [(x[0],x[1]) for x in order]
+    if skip_services is None:
+        skip_services = []
+    else:
+        if isinstance(skip_services[0],str):
+            skip_services = [skip_services]
+
+        normalized_skip_services = []
+
+        for skip_service in skip_services:
+            if not isinstance(skip_service, Sequence):
+                raise TypeError("expected Sequence, got {}".format(type(skip_service))
+                    )
+
+            if len(skip_service) != 2:
+                raise TypeError(
+                    '(stage, service) sequences be length 2; got "{}", of length {}'.format(
+                        skip_service, len(skip_service)
+                        )
+                    )
+
+            for item, name in zip(skip_service, ["Stage", "Service"]):
+                if not isinstance(item, str):
+                    raise TypeError(
+                        "{} must be specified as a string; got {}".format(name, type(item))
+                        )
+
+            normalized_skip_services.append((skip_service[0], skip_service[1]))
+
+        skip_services = normalized_skip_services
+
+        #
+        # Remove desired services from the order
+        #
+        order = [[x[0],x[1]] for x in order if (x[0],x[1]) not in skip_services]
         
-        new_order = []
-        for element in order:
-            if element in skip_stages:
-                continue
-            else:
-                new_order.append(list(element))
-
-        order = new_order
 
     param_selections = []
     if config.has_option(section, 'param_selections'):

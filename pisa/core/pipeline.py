@@ -82,11 +82,14 @@ class Pipeline(object):
         `config_parser.parse_pipeline_config()` method to get a config
         OrderedDict. If `OrderedDict`, use directly as pipeline configuration.
 
+    skip_services: sequence of 2 strings, sequence of these, or None; optional
+        (service, stage) to skip in the parsing 
+
     """
 
-    def __init__(self, config, skip_stages=None):
+    def __init__(self, config, skip_services=None):
         if isinstance(config, (str, PISAConfigParser)):
-            config = parse_pipeline_config(config=config, skip_stages=skip_stages)
+            config = parse_pipeline_config(config=config, skip_services=skip_services)
         elif isinstance(config, OrderedDict):
             pass
         else:
