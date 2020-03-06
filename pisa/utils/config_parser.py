@@ -653,14 +653,14 @@ def parse_pipeline_config(config, skip_services=None):
                         "{} must be specified as a string; got {}".format(name, type(item))
                         )
 
-            normalized_skip_services.append((skip_service[0], skip_service[1]))
+            normalized_skip_services.append([skip_service[0], skip_service[1]])
 
         skip_services = normalized_skip_services
 
         #
         # Remove desired services from the order
         #
-        order = [[x[0],x[1]] for x in order if (x[0],x[1]) not in skip_services]
+        order = [[x[0],x[1]] for x in order if [x[0],x[1]] not in skip_services]
         
 
     param_selections = []
