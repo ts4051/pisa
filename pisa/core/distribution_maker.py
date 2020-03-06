@@ -85,7 +85,7 @@ class DistributionMaker(object):
     intervals are non-physical.
 
     """
-    def __init__(self, pipelines, label=None, set_livetime_from_data=True):
+    def __init__(self, pipelines, label=None, set_livetime_from_data=True, skip_stages=None):
 
         self.label = label
         self._source_code_hash = None
@@ -98,7 +98,7 @@ class DistributionMaker(object):
 
         for pipeline in pipelines:
             if not isinstance(pipeline, Pipeline):
-                pipeline = Pipeline(pipeline)
+                pipeline = Pipeline(pipeline, skip_stages=skip_stages)
             self._pipelines.append(pipeline)
 
         data_run_livetime = None
