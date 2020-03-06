@@ -101,7 +101,7 @@ class DistributionMaker(object):
 
         for pipeline in pipelines:
             if not isinstance(pipeline, Pipeline):
-                pipeline = Pipeline(pipeline, skip_stages=skip_stages)
+                pipeline = Pipeline(pipeline, skip_services=skip_servies)
             self._pipelines.append(pipeline)
 
         data_run_livetime = None
