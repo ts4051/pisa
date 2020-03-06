@@ -528,12 +528,15 @@ def parse_param(config, section, selector, fullname, pname, value):
     return param
 
 
-def parse_pipeline_config(config):
+def parse_pipeline_config(config,skip_stages=None):
     """Parse pipeline config.
 
     Parameters
     ----------
     config : string or ConfigParser
+
+    skip_stages: None or List of Tuples identifying
+                 (service, stage) to skip in the parsing 
 
     Returns
     -------
@@ -613,6 +616,26 @@ def parse_pipeline_config(config):
 
     # Get and parse the order of the stages (and which services implement them)
     order = [split(x, STAGE_SEP) for x in split(config.get(section, 'order'))]
+
+
+    #
+    # Browse through the list of (service, stage) Tuple to skip, if any
+    #
+    if skip_stages is not None:
+        # Check the types of skip_Stages. must be a list of Tuples
+        assert isinstance(skip_stages,list) and isinstance(skip_stages[0],tuple), 'ERROR: skip_stages must be a list of Tuples'
+
+        # reformat order into a list of tuples
+        order = [(x[0],x[1]) for x in order]
+        
+        new_order = []
+        for element in order:
+            if element in skip_stages:
+                continue
+            else:
+                new_order.append(list(element))
+
+        order = new_order
 
     param_selections = []
     if config.has_option(section, 'param_selections'):

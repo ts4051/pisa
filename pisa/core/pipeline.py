@@ -84,9 +84,9 @@ class Pipeline(object):
 
     """
 
-    def __init__(self, config):
+    def __init__(self, config, skip_stages=None):
         if isinstance(config, (str, PISAConfigParser)):
-            config = parse_pipeline_config(config=config)
+            config = parse_pipeline_config(config=config, skip_stages=skip_stages)
         elif isinstance(config, OrderedDict):
             pass
         else:
