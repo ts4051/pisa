@@ -165,8 +165,19 @@ class Param:
         'help',
     )
 
-    def __init__(self, name, value, prior, range, is_fixed, unique_id=None,
-                 is_discrete=False, nominal_value=None, tex=None, help=''):
+    def __init__(
+        self,
+        name,
+        value,
+        prior,
+        range,
+        is_fixed,
+        unique_id=None,
+        is_discrete=False,
+        nominal_value=None,
+        tex=None,
+        help='',
+    ):  # pylint: disable=redefined-builtin
         self._range = None
         self._tex = None
         self._value = None
@@ -233,7 +244,7 @@ class Param:
     def value(self, val):
         # Strings, bools, and `None` are simply used as-is; otherwise, enforce
         # input have units (or default to units of `dimensionless`)
-        if not (val is None or isinstance(val, string_types) or isinstance(val, bool)):
+        if not (val is None or isinstance(val, (string_types, bool))):
             # A number with no units actually has units of "dimensionless"
             val = interpret_quantity(val, expect_sequence=False)
 
@@ -354,7 +365,7 @@ class Param:
 
     @nominal_value.setter
     def nominal_value(self, value):
-        if not (value is None or isinstance(value, bool) or isinstance(value, string_types)):
+        if not (value is None or isinstance(value, (bool, string_types))):
             value = interpret_quantity(value, expect_sequence=False)
         self.validate_value(value)
         self._nominal_value = value
@@ -608,7 +619,7 @@ class ParamSet(Sequence):
     def _by_name(self):
         return {obj.name: obj for obj in self._params}
 
-    def index(self, value):
+    def index(self, value):  # pylint: disable=arguments-differ
         """Return an integer index to the Param in this ParamSet indexed by
         `value`. This does not look up a param's `value` property but looks for
         param by name, integer index, or matching object.
@@ -812,6 +823,9 @@ class ParamSet(Sequence):
             return self._params[i]
         elif isinstance(i, str):
             return self._by_name[i]
+        raise IndexError(
+            f'Cannot index into a {self.__class__.__name__} with {type(i)} "{i}"'
+        )
 
     def __getattr__(self, attr):
         try:
@@ -839,7 +853,7 @@ class ParamSet(Sequence):
             if isinstance(val, Param):
                 assert val.name == attr
                 self._params[idx] = val
-            elif isbarenumeric(val):
+            elif isinstance(val, ureg.Quantity) or isbarenumeric(val):
                 self._params[idx].value = val
             else:
                 raise ValueError('Cannot set param "%s" to `val`=%s'
@@ -1392,7 +1406,7 @@ def test_ParamSet():
     logging.debug(str((param_set['a'].range)))
     try:
         param_set['a'].value = 33
-    except:
+    except Exception:
         pass
     else:
         assert False, 'was able to set value outside of range'
@@ -1466,14 +1480,14 @@ def test_ParamSet():
     # Try setting a param with a differently-named param
     try:
         param_set.reco_coszen = reco_coszen_fail
-    except:
+    except Exception:
         pass
     else:
         assert False
 
     try:
         param_set.reco_coszen = 30
-    except:
+    except Exception:
         pass
     else:
         assert False
@@ -1486,6 +1500,10 @@ def test_ParamSet():
     assert param_set.reco_coszen.value == -1.0
     param_set.reco_coszen = -1
     assert param_set.reco_coszen.value == -1.0
+    param_set.reco_coszen = ureg.Quantity("0.1 dimensionless")
+    assert param_set.reco_coszen.value == 0.1 == ureg.Quantity("0.1 dimensionless")
+    param_set.reco_energy = ureg.Quantity("10.1 GeV")
+    assert param_set.reco_energy.value == ureg.Quantity("10.1 GeV")
 
     # Test deepcopy
     param_set2 = deepcopy(param_set)
@@ -1542,7 +1560,9 @@ def test_ParamSet():
     finally:
         rmtree(temp_dir)
     assert recursiveEquality(param_set, param_set2)
-    assert recursiveEquality(param_set.serializable_state, param_set2.serializable_state)
+    assert recursiveEquality(
+        param_set.serializable_state, param_set2.serializable_state
+    )
 
     logging.info('<< PASS : test_ParamSet >>')
 
