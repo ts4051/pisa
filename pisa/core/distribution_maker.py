@@ -69,8 +69,6 @@ class DistributionMaker(object):
         checked for consistency (you should use multiple `Detector`s if you
         have incompatible data sets).
 
-    skip_services: sequence of 2 strings, sequence of these, or None; optional
-        (service, stage) to skip in the parsing 
 
     Notes
     -----
@@ -88,7 +86,7 @@ class DistributionMaker(object):
     intervals are non-physical.
 
     """
-    def __init__(self, pipelines, label=None, set_livetime_from_data=True, skip_services=None):
+    def __init__(self, pipelines, label=None, set_livetime_from_data=True):
 
         self.label = label
         self._source_code_hash = None
@@ -101,7 +99,7 @@ class DistributionMaker(object):
 
         for pipeline in pipelines:
             if not isinstance(pipeline, Pipeline):
-                pipeline = Pipeline(pipeline, skip_services=skip_services)
+                pipeline = Pipeline(pipeline)
             self._pipelines.append(pipeline)
 
         data_run_livetime = None

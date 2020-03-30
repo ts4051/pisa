@@ -529,15 +529,13 @@ def parse_param(config, section, selector, fullname, pname, value):
     return param
 
 
-def parse_pipeline_config(config, skip_services=None):
+def parse_pipeline_config(config):
     """Parse pipeline config.
 
     Parameters
     ----------
     config : string or ConfigParser
 
-    skip_services: sequence of 2 strings, sequence of these, or None; optional
-        (service, stage) to skip in the parsing 
 
     Returns
     -------
@@ -617,52 +615,7 @@ def parse_pipeline_config(config, skip_services=None):
 
     # Get and parse the order of the stages (and which services implement them)
     order = [split(x, STAGE_SEP) for x in split(config.get(section, 'order'))]
-
-
-    #
-    # If skip_servies is not None, normalize its format
-    #
-    if not (skip_services is None or isinstance(skip_services, Sequence)):
-        raise TypeError(
-            "`skip_services` expected to be None or Sequence, got {}".format(type(skip_services))
-        )
-
-    if skip_services is None:
-        skip_services = []
-    else:
-        if isinstance(skip_services[0],str):
-            skip_services = [skip_services]
-
-        normalized_skip_services = []
-
-        for skip_service in skip_services:
-            if not isinstance(skip_service, Sequence):
-                raise TypeError("expected Sequence, got {}".format(type(skip_service))
-                    )
-
-            if len(skip_service) != 2:
-                raise TypeError(
-                    '(stage, service) sequences be length 2; got "{}", of length {}'.format(
-                        skip_service, len(skip_service)
-                        )
-                    )
-
-            for item, name in zip(skip_service, ["Stage", "Service"]):
-                if not isinstance(item, str):
-                    raise TypeError(
-                        "{} must be specified as a string; got {}".format(name, type(item))
-                        )
-
-            normalized_skip_services.append([skip_service[0], skip_service[1]])
-
-        skip_services = normalized_skip_services
-
-        #
-        # Remove desired services from the order
-        #
-        order = [[x[0],x[1]] for x in order if [x[0],x[1]] not in skip_services]
-        
-
+    
     param_selections = []
     if config.has_option(section, 'param_selections'):
         param_selections = split(config.get(section, 'param_selections'))
