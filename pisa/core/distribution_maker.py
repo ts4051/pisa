@@ -203,7 +203,8 @@ class DistributionMaker(object):
         outputs = [pipeline.get_outputs(**kwargs) for pipeline in self] # pylint: disable=redefined-outer-name
         if return_sum:
             if len(outputs) > 1:
-                outputs = reduce(lambda x, y: sum(x) + sum(y), outputs)
+                outputs = sum([sum(x) for x in outputs])
+                #outputs = reduce(lambda x, y: sum(x) + sum(y), outputs)
             else:
                 outputs = sum(sum(outputs))
             outputs.name = sum_map_name
