@@ -10,7 +10,6 @@ from __future__ import absolute_import
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from collections import OrderedDict
 from collections.abc import Mapping
-from functools import reduce
 import inspect
 from itertools import product
 import os
