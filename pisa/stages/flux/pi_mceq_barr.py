@@ -25,6 +25,21 @@ from pisa.utils.numba_tools import WHERE, myjit
 from pisa.utils.resources import find_resource
 
 
+def eval_spline(true_log_energy, true_abs_coszen, spline):
+    """
+    Evaluate the spline for the full arrays of [ ln(energy), abs(coszen) ] values
+    """
+    return spline(true_abs_coszen, true_log_energy, grid=False)
+
+
+
+def antipion_production(barr_var, pion_ratio):
+    """
+    Combine pi+ param and pi+/pi- ratio to get pi- param
+    """
+    return ((1 + barr_var) / (1 + pion_ratio)) - 1
+
+
 class pi_mceq_barr(PiStage):
     """
     Stage to generate nominal flux from MCEq and apply Barr style flux uncertainties.
@@ -287,23 +302,21 @@ class pi_mceq_barr(PiStage):
             arb_gradient_param_key = self.gradient_param_names[0]
 
             # nue(bar)
-            self._eval_spline(
+            nu_flux_nominal[:, 0] = eval_spline(
                 true_log_energy=true_log_energy,
                 true_abs_coszen=true_abs_coszen,
                 spline=self.spline_tables_dict[arb_gradient_param_key][
                     "nue" if nubar > 0 else "nuebar"
                 ],
-                out=nu_flux_nominal[:, 0],
             )
 
             # numu(bar)
-            self._eval_spline(
+            nu_flux_nominal[:, 1] = eval_spline(
                 true_log_energy=true_log_energy,
                 true_abs_coszen=true_abs_coszen,
                 spline=self.spline_tables_dict[arb_gradient_param_key][
                     "numu" if nubar > 0 else "numubar"
                 ],
-                out=nu_flux_nominal[:, 1],
             )
 
             # nutau(bar)
@@ -327,23 +340,21 @@ class pi_mceq_barr(PiStage):
             ) in self.gradient_param_indices.items():
 
                 # nue(bar)
-                self._eval_spline(
+                gradients[:, 0, gradient_param_idx] = eval_spline(
                     true_log_energy=true_log_energy,
                     true_abs_coszen=true_abs_coszen,
                     spline=self.spline_tables_dict[gradient_param_name][
                         "dnue" if nubar > 0 else "dnuebar"
                     ],
-                    out=gradients[:, 0, gradient_param_idx],
                 )
 
                 # numu(bar)
-                self._eval_spline(
+                gradients[:, 1, gradient_param_idx] = eval_spline(
                     true_log_energy=true_log_energy,
                     true_abs_coszen=true_abs_coszen,
                     spline=self.spline_tables_dict[gradient_param_name][
                         "dnumu" if nubar > 0 else "dnumubar"
                     ],
-                    out=gradients[:, 1, gradient_param_idx],
                 )
 
                 # nutau(bar)
@@ -352,24 +363,6 @@ class pi_mceq_barr(PiStage):
 
             # Tell the smart arrays we've changed the flux gradient values on the host
             container["gradients"].mark_changed("host")
-
-    def _eval_spline(self, true_log_energy, true_abs_coszen, spline, out):
-        """
-        Evaluate the spline for the full arrays of [ ln(energy), abs(coszen) ] values
-        """
-
-        # Evalate the spine
-        result = spline(true_abs_coszen, true_log_energy, grid=False)
-
-        # Copy to output array
-        # TODO Can I directly write to the original array, will be faster
-        np.copyto(src=result, dst=out)
-
-    def antipion_production(self, barr_var, pion_ratio):
-        """
-        Combine pi+ param and pi+/pi- ratio to get pi- param
-        """
-        return ((1 + barr_var) / (1 + pion_ratio)) - 1
 
     @profile
     def compute_function(self):
@@ -401,7 +394,7 @@ class pi_mceq_barr(PiStage):
         gradient_params_mapping["h+"] = self.params.barr_h_Pi.value.m_as("dimensionless")
         gradient_params_mapping["i+"] = self.params.barr_i_Pi.value.m_as("dimensionless")
         for k in list(gradient_params_mapping.keys()):
-            gradient_params_mapping[k.replace("+", "-")] = self.antipion_production(
+            gradient_params_mapping[k.replace("+", "-")] = antipion_production(
                 gradient_params_mapping[k], pion_ratio
             )
 
