@@ -78,7 +78,7 @@ def append_arrays_dict(key, val, sdict):
                 sdict[key] = OrderedDict()
             append_arrays_dict(key2, val2, sdict[key])
     else :
-        assert isinstance(val, np.ndarray), "'%s' is not an array, is a %s" % (k, type(v)) 
+        assert isinstance(val, np.ndarray), "'%s' is not an array, is a %s" % (key, type(val)) 
         if key in sdict :
             sdict[key] = np.append(sdict[key], val)
         else :
