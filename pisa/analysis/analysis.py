@@ -338,7 +338,7 @@ class Analysis(object):
 
     def fit_hypo(self, data_dist, hypo_maker, hypo_param_selections, metric,
                  minimizer_settings, reset_free=True, 
-                 check_octant=True, fit_octants_separately=False,
+                 check_octant=True, fit_octants_separately=True,
                  check_ordering=False, other_metrics=None,
                  blind=False, pprint=True, external_priors_penalty=None):
         """Fitter "outer" loop: If `check_octant` is True, run
