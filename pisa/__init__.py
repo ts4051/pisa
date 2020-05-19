@@ -11,7 +11,14 @@ import sys
 import warnings
 
 from numba import jit as numba_jit
-from numba import NumbaDeprecationWarning
+
+FOUND_NumbaDeprecationWarning = False
+try:
+    from numba import NumbaDeprecationWarning
+    FOUND_NumbaDeprecationWarning = True
+except ImportError:
+    pass
+
 from numpy import (
     array, inf, nan,
     float32, float64,
@@ -124,7 +131,8 @@ if 'OMP_NUM_THREADS' in os.environ:
 
 
 # Get SmartArray DeprecationWarning out of the way silently
-warnings.filterwarnings("ignore", category=NumbaDeprecationWarning)
+if FOUND_NumbaDeprecationWarning :
+    warnings.filterwarnings("ignore", category=NumbaDeprecationWarning)
 
 NUMBA_CUDA_AVAIL = False
 def dummy_func(x):
