@@ -301,9 +301,9 @@ class PiStage(BaseStage):
         """
 
         # Handle optional user-overridden `output_mode`
-        if output_mode is None :
+        if output_mode is None:
             output_mode = self.output_mode
-        else :
+        else:
             assert output_mode in ["binned", "events"], "Unknown `output_mode` specified"
 
         # new behavior with explicitly defined output keys

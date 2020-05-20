@@ -25,14 +25,6 @@ from pisa.utils.numba_tools import WHERE, myjit
 from pisa.utils.resources import find_resource
 
 
-def eval_spline(true_log_energy, true_abs_coszen, spline):
-    """
-    Evaluate the spline for the full arrays of [ ln(energy), abs(coszen) ] values
-    """
-    return spline(true_abs_coszen, true_log_energy, grid=False)
-
-
-
 def antipion_production(barr_var, pion_ratio):
     """
     Combine pi+ param and pi+/pi- ratio to get pi- param
@@ -305,32 +297,26 @@ class pi_mceq_barr(PiStage):
             arb_gradient_param_key = self.gradient_param_names[0]
 
             # nue(bar)
-            nu_flux_nominal[:, 0] = eval_spline(
-                true_log_energy=true_log_energy,
-                true_abs_coszen=true_abs_coszen,
-                spline=self.spline_tables_dict[arb_gradient_param_key][
-                    "nue" if nubar > 0 else "nuebar"
-                ],
+            nu_flux_nominal[:, 0] = self.spline_tables_dict[arb_gradient_param_key]["nue" if nubar > 0 else "nuebar"](
+                true_abs_coszen,
+                true_log_energy,
+                grid=False,
             )
 
             # numu(bar)
-            nu_flux_nominal[:, 1] = eval_spline(
-                true_log_energy=true_log_energy,
-                true_abs_coszen=true_abs_coszen,
-                spline=self.spline_tables_dict[arb_gradient_param_key][
-                    "numu" if nubar > 0 else "numubar"
-                ],
+            nu_flux_nominal[:, 1] = self.spline_tables_dict[arb_gradient_param_key]["numu" if nubar > 0 else "numubar"](
+                true_abs_coszen,
+                true_log_energy,
+                grid=False,
             )
 
             # nutau(bar)
             # Currently setting to 0 #TODO include nutau flux (e.g. prompt) in splines
             if self.include_nutau_flux :
-                nu_flux_nominal[:, 2] = eval_spline(
-                    true_log_energy=true_log_energy,
-                    true_abs_coszen=true_abs_coszen,
-                    spline=self.spline_tables_dict[arb_gradient_param_key][
-                        "nutau" if nubar > 0 else "nutaubar"
-                    ],
+                nu_flux_nominal[:, 2] = self.spline_tables_dict[arb_gradient_param_key]["nutau" if nubar > 0 else "nutaubar"](
+                    true_abs_coszen,
+                    true_log_energy,
+                    grid=False,
                 )
 
             # Tell the smart arrays we've changed the nominal flux values on the host
@@ -351,31 +337,25 @@ class pi_mceq_barr(PiStage):
             ) in self.gradient_param_indices.items():
 
                 # nue(bar)
-                gradients[:, 0, gradient_param_idx] = eval_spline(
-                    true_log_energy=true_log_energy,
-                    true_abs_coszen=true_abs_coszen,
-                    spline=self.spline_tables_dict[gradient_param_name][
-                        "dnue" if nubar > 0 else "dnuebar"
-                    ],
+                gradients[:, 0, gradient_param_idx] = self.spline_tables_dict[gradient_param_name]["dnue" if nubar > 0 else "dnuebar"](
+                    true_abs_coszen,
+                    true_log_energy,
+                    grid=False,
                 )
 
                 # numu(bar)
-                gradients[:, 1, gradient_param_idx] = eval_spline(
-                    true_log_energy=true_log_energy,
-                    true_abs_coszen=true_abs_coszen,
-                    spline=self.spline_tables_dict[gradient_param_name][
-                        "dnumu" if nubar > 0 else "dnumubar"
-                    ],
+                gradients[:, 1, gradient_param_idx] = self.spline_tables_dict[gradient_param_name]["dnumu" if nubar > 0 else "dnumubar"](
+                    true_abs_coszen,
+                    true_log_energy,
+                    grid=False,
                 )
 
                 # nutau(bar)
                 if self.include_nutau_flux :
-                    gradients[:, 2, gradient_param_idx] = eval_spline(
-                        true_log_energy=true_log_energy,
-                        true_abs_coszen=true_abs_coszen,
-                        spline=self.spline_tables_dict[gradient_param_name][
-                            "dnutau" if nubar > 0 else "dnutaubar"
-                        ],
+                    gradients[:, 2, gradient_param_idx] = self.spline_tables_dict[gradient_param_name]["dnutau" if nubar > 0 else "dnutaubar"](
+                        true_abs_coszen,
+                        true_log_energy,
+                        grid=False,
                     )
 
             # Tell the smart arrays we've changed the flux gradient values on the host
@@ -508,9 +488,7 @@ def apply_sys_kernel(
     result += np.dot(gradients, gradient_params)
 
     # Check for negative results from spline (np.clip not supported by vectorization)
-    negative_mask = result < 0
-    if np.sum(negative_mask):
-        negative_mask[negative_mask] = 0.0
+    result[result < 0.0] = 0.0
 
     out[...] = result
 
