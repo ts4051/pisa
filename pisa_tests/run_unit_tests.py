@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# pylint: disable=exec-used, eval-used, logging-format-interpolation, logging-not-lazy
 
 
 """
@@ -9,12 +8,18 @@ Find and run PISA unit test functions
 from __future__ import absolute_import
 
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from importlib import import_module
 from os import walk
-from os.path import dirname, expanduser, expandvars, isfile, join, relpath
+from os.path import dirname, isfile, join, relpath
+import platform
+import socket
 import sys
 
+import cpuinfo
+import numpy as np
+
 import pisa
-from pisa.utils.fileio import nsort_key_func
+from pisa.utils.fileio import expand, nsort_key_func
 from pisa.utils.log import Levels, logging, set_verbosity
 
 pycuda, nbcuda = None, None  # pylint: disable=invalid-name
@@ -33,7 +38,6 @@ if pisa.TARGET == "cuda":
 
 __all__ = ["PISA_PATH", "run_unit_tests", "find_unit_tests", "find_unit_tests_in_file"]
 
-
 __author__ = "J.L. Lanfranchi"
 
 __license__ = """Copyright (c) 2020, The IceCube Collaboration
@@ -50,9 +54,12 @@ __license__ = """Copyright (c) 2020, The IceCube Collaboration
  See the License for the specific language governing permissions and
  limitations under the License."""
 
+# TODO: add timing for imports & unit test; faster => more used, more useful
 
-PISA_PATH = dirname(pisa.__file__)
-OPTIONAL_DEPS = (
+PISA_PATH = expand(dirname(pisa.__file__), absolute=True, resolve_symlinks=True)
+
+# TODO: get optional & required automatically (e.g., from setup.py?)
+OPTIONAL_MODULES = (
     "pandas",
     "emcee",
     "pycuda",
@@ -62,10 +69,39 @@ OPTIONAL_DEPS = (
     "MCEq",
     "nuSQUIDSpy",
 )
+"""Okay if imports or test_* functions fail due to these not being import-able"""
+
+REQUIRED_MODULES = (
+    "pisa",
+    "pip",
+    "setuptools",
+    "numpy",
+    "decorator",
+    "kde",
+    "h5py",
+    "iminuit",
+    "line_profiler",
+    "matplotlib",
+    "numba",
+    "numpy",
+    "pint",
+    "scipy",
+    "simplejson",
+    "tables",
+    "uncertainties",
+    "llvmlite",
+    "cpuinfo",
+    "sympy",
+)
+
 PFX = "[T] "
+"""Prefix each line output by this script to clearly delineate output from this
+script vs. output from test functions being run"""
 
 
-def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels.WARN):
+def run_unit_tests(
+    path=PISA_PATH, allow_missing=OPTIONAL_MODULES, verbosity=Levels.WARN
+):
     """Run all tests found at `path` (or recursively below if `path` is a
     directory).
 
@@ -90,7 +126,31 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
         If any import or test fails not in `allow_missing`
 
     """
-    path = expanduser(expandvars(path))
+    set_verbosity(verbosity)
+    logging.info("%sPlatform information:", PFX)
+    logging.info("%s  HOSTNAME = %s", PFX, socket.gethostname())
+    logging.info("%s  FQDN = %s", PFX, socket.getfqdn())
+    logging.info("%s  OS = %s %s", PFX, platform.system(), platform.release())
+    for key, val in cpuinfo.get_cpu_info().items():
+        logging.info("%s  %s = %s", PFX, key, val)
+    logging.info(PFX)
+    logging.info("%sModule versions:", PFX)
+    for module_name in REQUIRED_MODULES + OPTIONAL_MODULES:
+        try:
+            module = import_module(module_name)
+        except ImportError:
+            if module_name in REQUIRED_MODULES:
+                raise
+            ver = "optional module not installed or not import-able"
+        else:
+            if hasattr(module, "__version__"):
+                ver = module.__version__
+            else:
+                ver = "?"
+        logging.info("%s  %s : %s", PFX, module_name, ver)
+    logging.info(PFX)
+
+    path = expand(path, absolute=True, resolve_symlinks=True)
     if allow_missing is None:
         allow_missing = []
     elif isinstance(allow_missing, str):
@@ -108,17 +168,15 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
     for rel_file_path, test_func_names in tests.items():
         pypath = ["pisa"] + rel_file_path[:-3].split("/")
         parent_pypath = ".".join(pypath[:-1])
-        module = pypath[-1].replace(".", "_")
-        module_pypath = f"{parent_pypath}.{module}"
+        module_name = pypath[-1].replace(".", "_")
+        module_pypath = f"{parent_pypath}.{module_name}"
 
         try:
-            cmd = f"from {parent_pypath} import {module}"
-
             set_verbosity(verbosity)
-            logging.info(PFX + f'exec("{cmd}")')
+            logging.info(PFX + f"importing {module_pypath}")
 
             set_verbosity(Levels.WARN)
-            exec(cmd)
+            module = import_module(module_pypath, package=parent_pypath)
 
         except Exception as err:
             if (
@@ -129,7 +187,8 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
                 err_name = err.name  # pylint: disable=no-member
                 module_pypaths_failed_ignored.append(module_pypath)
                 logging.warning(
-                    PFX + f"module {err_name} failed to load, but ok to ignore"
+                    f"{PFX}module {err_name} failed to import wile importing"
+                    f" {module_pypath}, but ok to ignore"
                 )
                 continue
 
@@ -144,7 +203,7 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
             # Reproduce the failure with full output
             set_verbosity(Levels.TRACE)
             try:
-                exec(f"from {parent_pypath} import {module}")
+                import_module(module_name, package=parent_pypath)
             except Exception:
                 pass
 
@@ -163,14 +222,13 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
             test_pypath = f"{module_pypath}.{test_func_name}"
 
             try:
-                func_pypath = f"{module}.{test_func_name}"
-
                 set_verbosity(verbosity)
-                logging.debug(PFX + f"eval({func_pypath})")
+                logging.debug(PFX + f"getattr({module}, {test_func_name})")
 
                 set_verbosity(Levels.WARN)
-                test_func = eval(func_pypath)
+                test_func = getattr(module, test_func_name)
 
+                # Run the test function
                 set_verbosity(verbosity)
                 logging.info(PFX + f"{test_pypath}()")
 
@@ -204,8 +262,14 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
 
                 set_verbosity(Levels.TRACE)
                 try:
-                    test_func = eval(f"{module}.{test_func_name}")
-                    test_func()
+                    test_func = getattr(module, test_func_name)
+                    with np.printoptions(
+                        precision=np.finfo(pisa.FTYPE).precision + 2,
+                        floatmode="fixed",
+                        sign=" ",
+                        linewidth=200,
+                    ):
+                        test_func()
                 except Exception:
                     pass
 
@@ -243,10 +307,10 @@ def run_unit_tests(path=PISA_PATH, allow_missing=OPTIONAL_DEPS, verbosity=Levels
                 pass
 
         # Attempt to unload the imported module
-
-        if module in sys.modules:
-            del sys.modules[module]
-        exec(f"del {module}")
+        # TODO: pipeline, etc. fail as isinstance(service, (Stage, PiStage)) is False
+        #if module_pypath in sys.modules and module_pypath != "pisa":
+        #    del sys.modules[module_pypath]
+        #del module
 
         # TODO: crashes program; subseqeunt calls in same shell crash(!?!?)
         # if pisa.TARGET == 'cuda' and nbcuda is not None:
@@ -317,7 +381,7 @@ def find_unit_tests(path):
         if no such functions are found)
 
     """
-    path = expanduser(expandvars(path))
+    path = expand(path, absolute=True, resolve_symlinks=True)
 
     tests = {}
     if isfile(path):
@@ -352,6 +416,8 @@ def find_unit_tests_in_file(filepath):
     tests : list of str
 
     """
+    filepath = expand(filepath, absolute=True, resolve_symlinks=True)
+    assert isfile(filepath), str(filepath)
     tests = []
     with open(filepath, "r") as f:
         for line in f.readlines():
@@ -377,7 +443,7 @@ def main(description=__doc__):
     parser.add_argument(
         "--allow-missing",
         nargs="+",
-        default=list(OPTIONAL_DEPS),
+        default=list(OPTIONAL_MODULES),
         help="""Allow ImportError (or subclasses) for these modules""",
     )
     parser.add_argument(

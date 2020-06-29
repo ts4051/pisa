@@ -66,6 +66,8 @@ __all__ = [
     'TARGET',
     'OMP_NUM_THREADS',
     'FTYPE',
+    'CTYPE',
+    'ITYPE',
     'HASH_SIGFIGS',
     'EPSILON',
     'C_FTYPE',
@@ -144,10 +146,14 @@ finally:
         del cuda
 del dummy_func
 
-# Default value for FTYPE
+# Default values for float, complex types
 FTYPE = np.float64
 """Global floating-point data type. C, CUDA, and Numba datatype definitions are
 derived from this"""
+
+CTYPE = np.complex128
+"""Global complex-valued floating-point data type. C, CUDA, and Numba datatype
+definitions are derived from this"""
 
 # Set FTYPE from environment variable PISA_FTYPE, if it is defined
 FLOAT32_STRINGS = ['single', 'float32', 'fp32', '32', 'f4']
@@ -157,8 +163,10 @@ if 'PISA_FTYPE' in os.environ:
     ini_msgs.append('PISA_FTYPE env var is defined as: "%s"' % PISA_FTYPE)
     if PISA_FTYPE.strip().lower() in FLOAT32_STRINGS:
         FTYPE = np.float32
+        CTYPE = np.complex64
     elif PISA_FTYPE.strip().lower() in FLOAT64_STRINGS:
         FTYPE = np.float64
+        CTYPE = np.complex128
     else:
         raise ValueError(
             'Environment var PISA_FTYPE="%s" is unrecognized.\n'
@@ -166,6 +174,7 @@ if 'PISA_FTYPE' in os.environ:
             '--> For double precision set PISA_FTYPE to one of %s\n'
             %(PISA_FTYPE, FLOAT32_STRINGS, FLOAT64_STRINGS)
         )
+ITYPE = np.int32 if FTYPE == np.float32 else np.int64
 del FLOAT32_STRINGS, FLOAT64_STRINGS
 
 # set default target
