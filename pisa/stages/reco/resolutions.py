@@ -45,6 +45,8 @@ class resolutions(PiStage):
             'energy_improvement',
             'coszen_improvement',
             'pid_improvement',
+            'pid_min',
+            'pid_max',
         )
         input_names = ()
         output_names = ()
@@ -98,7 +100,13 @@ class resolutions(PiStage):
             logging.info('Changing PID resolutions')
             tmp = container['pid'].get('host')
             if container.name in ['numu_cc', 'numubar_cc']:
-                tmp += self.params.pid_improvement.m_as('dimensionless')
+                tmp *= ( 1. + self.params.pid_improvement.m_as('dimensionless') )
             else:
-                tmp -= self.params.pid_improvement.m_as('dimensionless')
+                tmp *= ( 1. - self.params.pid_improvement.m_as('dimensionless') )
+            underflow_mask = tmp <= self.params.pid_min.m_as('dimensionless')
+            if underflow_mask.sum() > 0 :
+                tmp[underflow_mask] = self.params.pid_min.m_as('dimensionless')
+            overflow_mask = tmp >= self.params.pid_max.m_as('dimensionless')
+            if overflow_mask.sum() > 0 :
+                tmp[overflow_mask] = self.params.pid_max.m_as('dimensionless')
             container['pid'].mark_changed('host')

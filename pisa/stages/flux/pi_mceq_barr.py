@@ -88,6 +88,7 @@ class pi_mceq_barr(PiStage):
         self,
         table_file,
         include_nutau_flux=False,
+        use_honda_nominal_flux=False,
         data=None,
         params=None,
         input_names=None,
@@ -97,6 +98,12 @@ class pi_mceq_barr(PiStage):
         calc_specs=None,
         output_specs=None,
     ):
+
+        # store args
+        self.table_file = table_file
+        self.include_nutau_flux = include_nutau_flux
+        self.use_honda_nominal_flux = use_honda_nominal_flux
+
 
         #
         # Define parameterisation
@@ -173,17 +180,22 @@ class pi_mceq_barr(PiStage):
         output_names = ()
 
         # what are the keys used from the inputs during apply
-        input_calc_keys = ()
+        input_calc_keys = []
+        if self.use_honda_nominal_flux :
+            input_calc_keys.extend([ "nu_flux_nominal", "nubar_flux_nominal" ])
+        input_calc_keys = tuple(input_calc_keys)
 
         # what are keys added or altered in the calculation used during apply
-        output_calc_keys = ("nu_flux_nominal", "nu_flux")
+        output_calc_keys = ["nu_flux"]
+        if not self.use_honda_nominal_flux :
+            output_calc_keys.append("nu_flux_nominal")
+        output_calc_keys = tuple(output_calc_keys)
+
         # what keys are added or altered for the outputs during apply
-        output_apply_keys = ("nu_flux_nominal", "nu_flux")
-
-        # store args
-        self.table_file = table_file
-        self.include_nutau_flux = include_nutau_flux
-
+        output_apply_keys = ["nu_flux"]
+        if not self.use_honda_nominal_flux :
+            output_apply_keys.append("nu_flux_nominal")
+        output_apply_keys = tuple(output_apply_keys)
 
         # init base class
         super(pi_mceq_barr, self).__init__(
@@ -204,6 +216,9 @@ class pi_mceq_barr(PiStage):
         assert self.input_mode is not None
         assert self.calc_mode is not None
         assert self.output_mode is not None
+
+        if self.use_honda_nominal_flux :
+            assert self.calc_mode == "events", "Currently there is a bug when using Honda as input and MCEq in binned mode. This needs fixing, but for now use events mode."
 
     def setup_function(self):
 
@@ -289,38 +304,40 @@ class pi_mceq_barr(PiStage):
             # Nominal flux
             #
 
-            # Evaluate splines to get nominal flux
-            # Need to correctly map nu/nubar and flavor to the output arrays
+            if not self.use_honda_nominal_flux :
 
-            # Note that nominal flux is stored multiple times (once per Barr parameter)
-            # Choose an arbitrary one to get the nominal fluxes
-            arb_gradient_param_key = self.gradient_param_names[0]
+                # Evaluate splines to get nominal flux
+                # Need to correctly map nu/nubar and flavor to the output arrays
 
-            # nue(bar)
-            nu_flux_nominal[:, 0] = self.spline_tables_dict[arb_gradient_param_key]["nue" if nubar > 0 else "nuebar"](
-                true_abs_coszen,
-                true_log_energy,
-                grid=False,
-            )
+                # Note that nominal flux is stored multiple times (once per Barr parameter)
+                # Choose an arbitrary one to get the nominal fluxes
+                arb_gradient_param_key = self.gradient_param_names[0]
 
-            # numu(bar)
-            nu_flux_nominal[:, 1] = self.spline_tables_dict[arb_gradient_param_key]["numu" if nubar > 0 else "numubar"](
-                true_abs_coszen,
-                true_log_energy,
-                grid=False,
-            )
-
-            # nutau(bar)
-            # Currently setting to 0 #TODO include nutau flux (e.g. prompt) in splines
-            if self.include_nutau_flux :
-                nu_flux_nominal[:, 2] = self.spline_tables_dict[arb_gradient_param_key]["nutau" if nubar > 0 else "nutaubar"](
+                # nue(bar)
+                nu_flux_nominal[:, 0] = self.spline_tables_dict[arb_gradient_param_key]["nue" if nubar > 0 else "nuebar"](
                     true_abs_coszen,
                     true_log_energy,
                     grid=False,
                 )
 
-            # Tell the smart arrays we've changed the nominal flux values on the host
-            container["nu_flux_nominal"].mark_changed("host")
+                # numu(bar)
+                nu_flux_nominal[:, 1] = self.spline_tables_dict[arb_gradient_param_key]["numu" if nubar > 0 else "numubar"](
+                    true_abs_coszen,
+                    true_log_energy,
+                    grid=False,
+                )
+
+                # nutau(bar)
+                # Currently setting to 0 #TODO include nutau flux (e.g. prompt) in splines
+                if self.include_nutau_flux :
+                    nu_flux_nominal[:, 2] = self.spline_tables_dict[arb_gradient_param_key]["nutau" if nubar > 0 else "nutaubar"](
+                        true_abs_coszen,
+                        true_log_energy,
+                        grid=False,
+                    )
+
+                # Tell the smart arrays we've changed the nominal flux values on the host
+                container["nu_flux_nominal"].mark_changed("host")
 
 
             #
@@ -424,17 +441,25 @@ class pi_mceq_barr(PiStage):
 
         for container in self.data:
 
+            # Figure out which key to use for the nominal flux
+            if self.use_honda_nominal_flux :
+                if container["nubar"] > 0: nominal_flux_key = "nu_flux_nominal"
+                elif container["nubar"] < 0: nominal_flux_key = "nubar_flux_nominal"
+            else :
+                nominal_flux_key = "nu_flux_nominal"
+
+            # Calculate the new flux given the current param values
             apply_sys_vectorized(
                 container["true_energy"].get(WHERE),
                 container["true_coszen"].get(WHERE),
                 delta_index,
                 energy_pivot,
-                container["nu_flux_nominal"].get(WHERE),
+                container[nominal_flux_key].get(WHERE),
                 container["gradients"].get(WHERE),
                 self.gradient_params,
                 out=container["nu_flux"].get(WHERE),
             )
-            
+
             container["nu_flux"].mark_changed(WHERE)
 
 

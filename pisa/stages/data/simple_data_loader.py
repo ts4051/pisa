@@ -17,6 +17,7 @@ from pisa.core.events_pi import EventsPi
 from pisa.utils.format import arg_str_seq_none, split
 
 
+
 class simple_data_loader(PiStage):
     """
     HDF5 file loader PISA Pi class
@@ -136,9 +137,10 @@ class simple_data_loader(PiStage):
             fraction_events_to_keep=self.fraction_events_to_keep,
         )
 
-        # Parse the variable mapping string if one exists
-        if self.data_dict is not None:
-            self.data_dict = eval(self.data_dict)
+        # If user provided a variable mapping dict, parse it from the input string (if not already done)
+        if self.data_dict is not None :
+            if isinstance(self.data_dict, str):
+                self.data_dict = eval(self.data_dict)
 
         # Load the event file into the events structure
         self.evts.load_events_file(
