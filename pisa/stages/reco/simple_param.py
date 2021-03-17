@@ -730,7 +730,7 @@ class simple_param(PiStage):
             true_energy = container["true_energy"].get(WHERE)
             true_coszen = container["true_coszen"].get(WHERE)
             true_azimuth = container["true_azimuth"].get(WHERE)
-            inelasticity = container["inelasticity"].get(WHERE) if "inelasticity" in container.array_data else None #TODO "in container" issue 
+            inelasticity = container["bjorken_y"].get(WHERE) if "bjorken_y" in container.array_data else None #TODO "in container" issue 
 
 
             #
