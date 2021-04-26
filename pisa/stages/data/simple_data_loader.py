@@ -69,6 +69,7 @@ class simple_data_loader(PiStage):
                  calc_specs=None,
                  output_specs=None,
                  fraction_events_to_keep=None,
+                 keep_inverse=False,
                 ):
 
         # instantiation args that should not change
@@ -78,6 +79,7 @@ class simple_data_loader(PiStage):
         self.neutrinos = neutrinos
         self.required_metadata = required_metadata
         self.fraction_events_to_keep = fraction_events_to_keep
+        self.keep_inverse = keep_inverse
 
         # Handle list inputs
         self.events_file = split(self.events_file)
@@ -135,6 +137,7 @@ class simple_data_loader(PiStage):
             name='Events',
             neutrinos=self.neutrinos,
             fraction_events_to_keep=self.fraction_events_to_keep,
+            keep_inverse=self.keep_inverse,
         )
 
         # If user provided a variable mapping dict, parse it from the input string (if not already done)
@@ -205,9 +208,16 @@ class simple_data_loader(PiStage):
                 np.ones(container.size, dtype=FTYPE)
             )
             if 'initial_weights' not in container.array_data:
+                if self.fraction_events_to_keep is not None:
+                    if self.keep_inverse:
+                        initial_weights = np.full(container.size, 1./(1.-float(self.fraction_events_to_keep)), dtype=FTYPE)
+                    else:
+                        initial_weights = np.full(container.size, 1./(float(self.fraction_events_to_keep)), dtype=FTYPE)
+                else:
+                    initial_weights = np.ones(container.size, dtype=FTYPE)
                 container.add_array_data(
                     'initial_weights',
-                    np.ones(container.size, dtype=FTYPE)
+                    initial_weights
                 )
 
             # add neutrino flavor information for neutrino events

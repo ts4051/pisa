@@ -130,6 +130,7 @@ class EventsPi(OrderedDict):
         name=None,
         neutrinos=True,
         fraction_events_to_keep=None,
+        keep_inverse=False,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -137,9 +138,11 @@ class EventsPi(OrderedDict):
         self.name = name
         self.neutrinos = neutrinos
         self.fraction_events_to_keep = fraction_events_to_keep
+        self.keep_inverse = keep_inverse
 
         # Check `fraction_events_to_keep` value is required range
         if self.fraction_events_to_keep is not None:
+            self.fraction_events_to_keep = float(self.fraction_events_to_keep)
             assert (self.fraction_events_to_keep >= 0.) and (self.fraction_events_to_keep <= 1.), "`fraction_events_to_keep` must be in range [0.,1.], or None to disable"
 
         # Define some metadata
@@ -431,8 +434,12 @@ class EventsPi(OrderedDict):
                     # Down sample events if required
                     if self.fraction_events_to_keep is not None:
                         rand = np.random.RandomState(123456) # Enforce same sample each time
-                        num_events_to_keep = int(np.round(self.fraction_events_to_keep*float(array_data.size)))
-                        array_data = rand.choice(array_data, size=num_events_to_keep, replace=False)
+                        rand_array = rand.rand(array_data.size)
+                        keep_mask = rand_array<=self.fraction_events_to_keep
+                        if self.keep_inverse:
+                            array_data = array_data[~keep_mask]
+                        else:
+                            array_data = array_data[keep_mask]
 
                     # Add to array
                     self[data_key][var_dst] = array_data
