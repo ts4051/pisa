@@ -158,7 +158,7 @@ class EventsPi(OrderedDict):
         )
 
 
-    def load_events_file(self, events_file, variable_mapping=None, required_metadata=None):
+    def load_events_file(self, events_file, variable_mapping=None, required_metadata=None, seed=123456):
         """Fill this events container from an input HDF5 file filled with event
         data Optionally can provide a variable mapping so select a subset of
         variables, rename them, etc.
@@ -433,7 +433,9 @@ class EventsPi(OrderedDict):
                 else:
                     # Down sample events if required
                     if self.fraction_events_to_keep is not None:
-                        rand = np.random.RandomState(123456) # Enforce same sample each time
+                        print('USING SEED '+str(seed))
+                        rand = np.random.RandomState(seed) # Enforce same sample each time
+                        #rand = np.random.RandomState(123456) # Enforce same sample each time
                         rand_array = rand.rand(array_data.size)
                         keep_mask = rand_array<=self.fraction_events_to_keep
                         if self.keep_inverse:
