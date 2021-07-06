@@ -2104,7 +2104,7 @@ def load_hypersurfaces(input_file, expected_binning=None):
     # Check binning
     if expected_binning is not None:
         for hypersurface in hypersurfaces.values():
-            assert hypersurface.binning.hash == expected_binning.hash, ""
+            assert hypersurface.binning.hash == expected_binning.hash, "Mismatch between analysis and hypersurface binning. Hashes do not match (%s, %s)" % (hypersurface.binning.hash, expected_binning.hash)
 
     return hypersurfaces
 
