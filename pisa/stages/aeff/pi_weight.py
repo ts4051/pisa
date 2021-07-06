@@ -7,6 +7,7 @@ from __future__ import absolute_import, print_function, division
 from pisa.core.pi_stage import PiStage
 from pisa.utils import vectorizer
 from pisa.utils.profiler import profile
+from pisa.utils.numba_tools import WHERE
 
 
 class pi_weight(PiStage):  # pylint: disable=invalid-name
@@ -81,3 +82,4 @@ class pi_weight(PiStage):  # pylint: disable=invalid-name
                 scale=scale,
                 out=container['weights'],
             )
+            container['weights'].mark_changed(WHERE)
