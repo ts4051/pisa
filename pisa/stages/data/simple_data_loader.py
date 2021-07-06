@@ -70,6 +70,7 @@ class simple_data_loader(PiStage):
                  output_specs=None,
                  fraction_events_to_keep=None,
                  keep_inverse=False,
+                 seed=123456,
                 ):
 
         # instantiation args that should not change
@@ -80,6 +81,7 @@ class simple_data_loader(PiStage):
         self.required_metadata = required_metadata
         self.fraction_events_to_keep = fraction_events_to_keep
         self.keep_inverse = keep_inverse
+        self.seed = int(seed)
 
         # Handle list inputs
         self.events_file = split(self.events_file)
@@ -150,6 +152,7 @@ class simple_data_loader(PiStage):
             events_file=self.events_file,
             variable_mapping=self.data_dict,
             required_metadata=self.required_metadata,
+            seed=self.seed,
         )
 
         if hasattr(self.evts, "metadata"):
