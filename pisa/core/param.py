@@ -15,6 +15,7 @@ from operator import setitem
 from os.path import join
 from shutil import rmtree
 import sys
+from tabulate import tabulate
 import tempfile
 
 import numpy as np
@@ -31,7 +32,7 @@ from pisa.utils.hash import hash_obj
 from pisa.utils.log import logging, set_verbosity
 from pisa.utils.random_numbers import get_random_state
 from pisa.utils.stats import ALL_METRICS, CHI2_METRICS, LLH_METRICS
-
+from pisa.utils.comparisons import FTYPE_PREC
 
 __all__ = [
     'Param',
@@ -89,6 +90,11 @@ class Param:
     is_discrete : bool, optional
         Default is False
 
+    scales_as_log : bool, optional
+        Rescale the log of the parameter's value between 0 and 1 for minimization,
+        rather than the value itself. This can help optimizing parameters spanning
+        several orders of magnitude.
+
     nominal_value : same type as `value`, optional
         If None (default), set to same as `value`
 
@@ -141,6 +147,7 @@ class Param:
         'range',
         'is_fixed',
         'is_discrete',
+        'scales_as_log',
         'nominal_value',
         'tex',
         '_rescaled_value',
@@ -160,6 +167,7 @@ class Param:
         'range',
         'is_fixed',
         'is_discrete',
+        'scales_as_log',
         'nominal_value',
         'tex',
         'help',
@@ -174,6 +182,7 @@ class Param:
         is_fixed,
         unique_id=None,
         is_discrete=False,
+        scales_as_log=False,
         nominal_value=None,
         tex=None,
         help='',
@@ -186,6 +195,7 @@ class Param:
         self._prior = None
 
         self.value = value
+        self.scales_as_log = scales_as_log
         self.name = name
         self.unique_id = unique_id if unique_id is not None else name
         self.tex = tex
@@ -196,6 +206,14 @@ class Param:
         self.is_discrete = is_discrete
         self.nominal_value = value if nominal_value is None else nominal_value
         self.normalize_values = False
+
+        if self.scales_as_log and range[0].m * range[1].m <= 0:
+            raise ValueError("A parameter with log-scaling must have a range that is "
+                "either entirely negative or entirely positive.")
+
+
+    def __repr__(self):
+        return f"{self.name}, value: {self.value}, nominal_value: {self.nominal_value}, range: {self.range}, prior: {self.prior}, is_fixed: {self.is_fixed}"
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -228,8 +246,8 @@ class Param:
                         '%s'%(self.name, value, self.range)
                     )
             else:
-                value_not_big_enough = value < min(self.range)
-                value_not_small_enough = value > max(self.range)
+                value_not_big_enough = value.m_as(self._units) < min(self.range).m_as(self._units)
+                value_not_small_enough = value.m_as(self._units) > max(self.range).m_as(self._units)
                 if value_not_big_enough or value_not_small_enough:
                     raise ValueError(
                         'Param %s has a value %s which is not in the range of '
@@ -302,6 +320,10 @@ class Param:
                 )
             )
 
+        if self.scales_as_log and values[0].m * values[1].m <= 0:
+            raise ValueError("A parameter with log-scaling must have a range that is "
+                "either entirely negative or entirely positive.")
+
         new_vals = []
         for val in values:
             val = interpret_quantity(val, expect_sequence=False)
@@ -332,9 +354,18 @@ class Param:
             raise ValueError('Cannot rescale without a range specified'
                              ' for parameter %s' % self)
         srange = self.range
-        srange0 = srange[0].m
-        srange1 = srange[1].m
-        return (self._value.m - srange0) / (srange1 - srange0)
+        srange0 = srange[0].m_as(self._units)
+        srange1 = srange[1].m_as(self._units)
+        value = self._value.m_as(self._units)
+
+        if self.scales_as_log:
+            if srange0 < 0:  # entire range assumed negative (asserted elsewhere)
+                srange0 *= -1
+                srange1 *= -1
+                value *= -1
+            return (np.log(value) - np.log(srange0)) / (np.log(srange1) - np.log(srange0))
+        else:
+            return (value - srange0) / (srange1 - srange0)
 
     @_rescaled_value.setter
     def _rescaled_value(self, rval):
@@ -342,14 +373,20 @@ class Param:
         if srange is None:
             raise ValueError('Cannot rescale without a range specified'
                              ' for parameter %s' % self)
-        if rval < 0 or rval > 1:
+        if rval < 0 or rval > 1 + FTYPE_PREC:
             raise ValueError(
                 '%s: `rval`=%.15e, but cannot be outside [0, 1]'
                 % (self.name, rval)
             )
-        srange0 = srange[0].m
-        srange1 = srange[1].m
-        self._value = (srange0 + (srange1 - srange0)*rval) * self._units
+        rval = np.min([1., rval])  # make exactly 1. if rounding error occurred
+        srange0 = srange[0].m_as(self._units)
+        srange1 = srange[1].m_as(self._units)
+        if self.scales_as_log:
+            # it is possible that the entire value range is negative, taking the
+            # absolute value only inside log() produces the correct sign
+            self._value = np.exp(rval*(np.log(np.abs(srange1)) - np.log(np.abs(srange0)))) * srange0 * self._units
+        else:
+            self._value = (srange0 + (srange1 - srange0)*rval) * self._units
 
     @property
     def tex(self):
@@ -621,7 +658,10 @@ class ParamSet(MutableSequence, Set):
                 'All params must be of type "Param"'
 
         self._params = param_sequence
-        self.normalize_values = False
+
+        # if we do not normalize, then the hash will change upon evaluating unit changes
+        # I think because the changed units are cached in the object (Philipp)
+        self.normalize_values = True
 
     @property
     def serializable_state(self):
@@ -630,6 +670,38 @@ class ParamSet(MutableSequence, Set):
     @property
     def _by_name(self):
         return {obj.name: obj for obj in self._params}
+
+    def __repr__(self):
+        return self.tabulate(tablefmt="presto")
+
+    def _repr_html_(self):
+        return self.tabulate(tablefmt="html")
+
+    def tabulate(self, tablefmt="plain"):
+        headers = ['name', 'value', 'nominal_value', 'range', 'prior', 'units', 'is_fixed']
+        colalign=["right"] + ["center"] * (len(headers) -1 )
+        table = []
+        for p in self:
+            if (p.value is None or isinstance(p.value, (string_types, bool))):
+                table.append([p.name, p.value, p.nominal_value, p.range, p.prior, p.units, p.is_fixed])
+            else:
+                if p.range is not None:
+                    range_fmt = [r.m for r in p.range]
+                else:
+                    range_fmt = None
+                if p.prior is not None:
+                    if p.prior.kind == "gaussian":
+                        prior_fmt = "+/- %s"%p.prior.stddev.m
+                    elif p.prior.kind == "uniform":
+                        prior_fmt = "uniform"
+                    else:
+                        prior_fmt = p.prior
+                else:
+                    prior_fmt = p.prior
+                table.append([p.name, p.value.m, p.nominal_value.m, range_fmt, prior_fmt, p.units, p.is_fixed])
+        if len(table) == 0:
+            return "Empty Params"
+        return tabulate(table, headers, tablefmt=tablefmt, colalign=colalign)
 
     def index(self, value):  # pylint: disable=arguments-differ
         """Return an integer index to the Param in this ParamSet indexed by
@@ -773,6 +845,8 @@ class ParamSet(MutableSequence, Set):
             If True, params not in this param set are appended.
 
         """
+        # make sure we're having a new object!
+        #obj = deepcopy(obj)
         if isinstance(obj, (Sequence, ParamSet)):
             for param in obj:
                 self.update(param, existing_must_match=existing_must_match,
@@ -1288,6 +1362,7 @@ def test_Param():
     """Unit tests for Param class"""
     # pylint: disable=unused-variable
     from scipy.interpolate import splrep
+    from pisa.utils.comparisons import ALLCLOSE_KW
 
     temp_dir = tempfile.mkdtemp()
 
@@ -1310,6 +1385,20 @@ def test_Param():
             logging.error(msg)
             raise ValueError(msg)
 
+    def check_scaling(p0):
+        value_prescale = p0.value
+        # calculate rescaled value that is used by the minimizer, make sure
+        # the original value can be recovered
+        rval = p0._rescaled_value
+        p0._rescaled_value = rval
+        assert np.isclose(p0.value.m_as(p0.u), value_prescale.m_as(p0.u), **ALLCLOSE_KW)
+        # check nothing breaks when we go to the edges
+        p0.value = p0.range[0]
+        assert p0._rescaled_value == 0.
+        p0.value = p0.range[1]
+        assert p0._rescaled_value == 1.
+        p0.value = value_prescale
+
     try:
         uniform = Prior(kind='uniform', llh_offset=1.5)
         gaussian = Prior(kind='gaussian', mean=10*ureg.meter, stddev=1*ureg.meter)
@@ -1326,9 +1415,26 @@ def test_Param():
         spline = Prior(kind='spline', knots=knots, coeffs=coeffs, deg=deg)
 
         # Param with units, prior with compatible units
-        p0 = Param(name='c', value=1.5*ureg.foot, prior=gaussian,
+        p0 = Param(name='c', value=5000*ureg.foot, prior=gaussian,
                    range=[-1, 2]*ureg.mile, is_fixed=False, is_discrete=False,
                    tex=r'\int{\rm c}')
+        check_scaling(p0)
+        check_json(p0, "p0")
+
+        # Param with units, prior with compatible units, log-scaling behavior
+        p0 = Param(name='c', value=5000*ureg.foot, prior=gaussian,
+                   # range entirely positive
+                   range=[0.1, 2]*ureg.mile, is_fixed=False, is_discrete=False,
+                   scales_as_log=True, tex=r'\int{\rm c}')
+        check_scaling(p0)
+        check_json(p0, "p0")
+
+        # range entirely negative
+        p0 = Param(name='c', value=-5000*ureg.foot, prior=gaussian,
+                   # range entirely positive
+                   range=[-0.1, -2]*ureg.mile, is_fixed=False, is_discrete=False,
+                   scales_as_log=True, tex=r'\int{\rm c}')
+        check_scaling(p0)
         check_json(p0, "p0")
 
         # Param with no units, prior with no units
