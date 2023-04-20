@@ -3013,8 +3013,15 @@ class Analysis(BasicAnalysis):
                         logging.debug("deleting %s", k)
                         del best_fit.minimizer_metadata[k]
 
+            print(best_fit.metric_val)
+
+            # Check if fit was successful
+            assert best_fit.minimizer_metadata["success"], "Minimizer failed : %s" % best_fit.minimizer_metadata["message"]
+
+            # Format results before saving to file
             best_fit.metric_val = deepcopy(
-                best_fit.metric_val.serializable_state
+                # best_fit.metric_val.serializable_state
+                best_fit.metric_val
             )
             if isinstance(best_fit.hypo_asimov_dist, Sequence):
                 best_fit.hypo_asimov_dist = [deepcopy(
@@ -3026,25 +3033,33 @@ class Analysis(BasicAnalysis):
                 )
 
             # decide which information to retain based on chosen debug mode
-            if debug_mode == 0 or debug_mode == 1:
-                try:
-                    del best_fit['fit_history']
-                    del best_fit.hypo_asimov_dist
-                except KeyError:
-                    pass
+            # if debug_mode == 0 or debug_mode == 1:
+            #     try:
+            #         del best_fit['fit_history']
+            #         del best_fit.hypo_asimov_dist
+            #     except KeyError:
+            #         pass
 
-            if debug_mode == 0:
-                # torch the woods!
-                try:
-                    del best_fit.minimizer_metadata
-                    del best_fit.minimizer_time
-                except KeyError:
-                    pass
+            # if debug_mode == 0:
+            #     # torch the woods!
+            #     try:
+            #         del best_fit.minimizer_metadata
+            #         del best_fit.minimizer_time
+            #     except KeyError:
+            #         pass
 
             results['results'].append(best_fit)
+
+            # Store this scan point to a file
             if outfile is not None:
                 # store intermediate results
-                to_file(results, outfile)
+                scan_point_outfile = outfile.format(index=i)
+                scan_point_results = {
+                    "index" : i,
+                    "scan_point" : pos,
+                    "best_fit" : best_fit,
+                }
+                to_file(scan_point_results, scan_point_outfile)
 
         return results
 
